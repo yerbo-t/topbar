@@ -48,7 +48,6 @@
   .notch.collapsed .l, .notch.collapsed .r { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
   .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
   .dot.work { background: var(--work); } .dot.wait { background: var(--wait); animation: pulse 1.6s ease-in-out infinite; }
-  .dot.term { background: transparent; border: 2px solid var(--wait); }
   .dot.done { background: var(--done); } .dot.idle { background: var(--idle); }
   @keyframes pulse { 50% { opacity: .35; } }
   @media (prefers-reduced-motion: reduce) { .dot.wait { animation: none; } }
@@ -92,7 +91,7 @@
   <a href="#s1"><b>1</b> Свёрнут</a>
   <a href="#s2"><b>2</b> Список сессий</a>
   <a href="#s3"><b>3</b> Запрос разрешения</a>
-  <a href="#s8"><b>4</b> Ждёт в терминале</a>
+  <a href="#s8"><b>4</b> Остров молчит</a>
   <a href="#s4"><b>5</b> Сессия готова</a>
   <a href="#s6"><b>6</b> Переход к сессии</a>
   <a href="#s7"><b>7</b> Меню приложения</a>
@@ -123,7 +122,7 @@
       <div class="win">Safari — документация drizzle</div>
       <div class="notch open">
         <a class="row" href="#s6"><span class="dot work"></span><span class="t">topbar · feat/discovery</span><span class="s work">работает</span><span class="a">Записывает docs/specs/prototype-topbar-mvp.html</span></a>
-        <a class="row" href="#s3"><span class="dot wait"></span><span class="t">overstore · feat/checkout</span><span class="s wait">ждёт · 27 с</span><span class="a">Запрос: Bash — pnpm drizzle-kit push</span></a>
+        <a class="row" href="#s3"><span class="dot wait"></span><span class="t">overstore · feat/checkout</span><span class="s wait">ждёт разрешения</span><span class="a">Запрос: Bash — pnpm drizzle-kit push</span></a>
         <a class="row" href="#s6"><span class="dot done"></span><span class="t">finea-erp · fix/invoice-rounding</span><span class="s done">готово</span><span class="a">Исправлено округление в счетах</span></a>
         <a class="row" href="#s6"><span class="dot idle"></span><span class="t">dotfiles · main</span><span class="s">простаивает</span><span class="a">Ждёт новый запрос</span></a>
         <div class="foot"><span>4 сессии</span><a href="#s1">Свернуть</a></div>
@@ -133,7 +132,7 @@
 
   <!-- 3. Запрос разрешения -->
   <section class="screen" id="s3">
-    <p class="caption"><strong>Сценарий 3.</strong> Вы не смотрите на эту сессию — остров раскрылся сам. На карточке видно, что просит сессия, и сколько осталось из 30 с. Если запрос длинный, высота ограничена и появляется «показано не всё». «Разрешить» или «Отклонить» возвращает ответ в Claude Code. Остальные запросы ждут своей очереди. <a href="#s8">Если не ответить за 30 с →</a></p>
+    <p class="caption"><strong>Сценарий 3.</strong> Вы не смотрите на эту сессию — остров раскрылся сам. На карточке видно, что просит сессия. Если запрос длинный, высота ограничена и появляется «показано не всё». «Разрешить» или «Отклонить» возвращает ответ в Claude Code, и диалог в терминале закрывается сам. Диалог в терминале при этом открыт с самого начала — ответить можно и там, тогда карточка исчезнет. Остальные запросы ждут своей очереди. <a href="#s8">Если вы смотрите на эту сессию →</a></p>
     <div class="display">
       <div class="menubar"><span></span><span>Safari</span><span>Файл</span><span>Правка</span><span>Вид</span><a class="mbicon" href="#s7" aria-label="Меню topbar"><i></i></a></div>
       <div class="win">Safari — документация drizzle</div>
@@ -145,22 +144,21 @@
         <div class="btns">
           <a class="btn ok" href="#s2">Разрешить</a>
           <a class="btn" href="#s2">Отклонить</a>
-          <span class="count">27 с</span>
         </div>
-        <div class="hint"><span>Не успеете — решение останется за терминалом.</span><a href="#s6">Перейти к сессии</a></div>
+        <div class="hint"><span>Ответить можно и в самом терминале.</span><a href="#s6">Перейти к сессии</a></div>
       </div>
     </div>
   </section>
 
   <!-- 4. Ждёт в терминале -->
   <section class="screen" id="s8">
-    <p class="caption"><strong>Сценарий 4.</strong> Прошло 30 с или карточку нельзя было показать: решение осталось за терминалом, у сессии статус «ждёт в терминале» (кольцо вместо точки). Ответ в терминале сам снимает этот статус. Если вы смотрели на эту сессию, остров вообще не раскрывался, а запрос сразу ушёл терминалу. <a href="#s6">Перейти к сессии →</a></p>
+    <p class="caption"><strong>Сценарий 4.</strong> Вы смотрите на эту сессию (или экрана с вырезом нет), поэтому остров не раскрылся и не звякнул. Строка просто показывает «ждёт разрешения»; ответьте в терминале, и статус снимется сам. <a href="#s6">Перейти к сессии →</a></p>
     <div class="display">
       <div class="menubar"><span></span><span>Safari</span><span>Файл</span><span>Правка</span><span>Вид</span><a class="mbicon" href="#s7" aria-label="Меню topbar"><i></i></a></div>
       <div class="win">Safari — документация drizzle</div>
       <div class="notch open">
         <a class="row" href="#s6"><span class="dot work"></span><span class="t">topbar · feat/discovery</span><span class="s work">работает</span><span class="a">Записывает docs/specs/prototype-topbar-mvp.html</span></a>
-        <a class="row" href="#s6"><span class="dot term"></span><span class="t">overstore · feat/checkout</span><span class="s wait">ждёт в терминале</span><span class="a">Bash — pnpm drizzle-kit push</span></a>
+        <a class="row" href="#s6"><span class="dot wait"></span><span class="t">overstore · feat/checkout</span><span class="s wait">ждёт разрешения</span><span class="a">Bash — pnpm drizzle-kit push</span></a>
         <a class="row" href="#s6"><span class="dot done"></span><span class="t">finea-erp · fix/invoice-rounding</span><span class="s done">готово</span><span class="a">Исправлено округление в счетах</span></a>
         <a class="row" href="#s6"><span class="dot idle"></span><span class="t">dotfiles · main</span><span class="s">простаивает</span><span class="a">Ждёт новый запрос</span></a>
         <div class="foot"><span>Ответьте в терминале — статус снимется сам</span><a href="#s1">Свернуть</a></div>
