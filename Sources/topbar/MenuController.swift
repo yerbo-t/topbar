@@ -1,0 +1,156 @@
+import AppKit
+import ServiceManagement
+import TopbarCore
+
+/// Иконка в строке меню: единственный вход в управление приложением.
+@MainActor
+final class MenuController: NSObject, NSMenuDelegate {
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let menu = NSMenu()
+    private let hooks = HooksController()
+
+    override init() {
+        super.init()
+        if let button = statusItem.button {
+            button.image = NSImage(systemSymbolName: "capsule.portrait.tophalf.filled", accessibilityDescription: "topbar")
+                ?? NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "topbar")
+            button.image?.isTemplate = true
+            button.toolTip = "topbar — сессии Claude Code"
+        }
+        menu.delegate = self
+        statusItem.menu = menu
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let status = NSMenuItem(title: "Хуки Claude Code: \(hooks.statusText())", action: nil, keyEquivalent: "")
+        status.isEnabled = false
+        menu.addItem(status)
+        menu.addItem(item("Установить хуки…", #selector(installHooks)))
+        menu.addItem(item("Удалить хуки…", #selector(removeHooks)))
+        menu.addItem(.separator())
+        let login = item("Запускать при входе", #selector(toggleLogin))
+        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        menu.addItem(login)
+        let sound = item("Звук", #selector(toggleSound))
+        sound.state = Settings.soundEnabled ? .on : .off
+        menu.addItem(sound)
+        menu.addItem(.separator())
+        menu.addItem(item("Выйти", #selector(quit), key: "q"))
+    }
+
+    private func item(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.target = self
+        return item
+    }
+
+    @objc func installHooks() { hooks.install() }
+    @objc func removeHooks() { hooks.remove() }
+    @objc func toggleSound() { Settings.soundEnabled.toggle() }
+    @objc func quit() { NSApp.terminate(nil) }
+
+    @objc func toggleLogin() {
+        do {
+            if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() } else { try SMAppService.mainApp.register() }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Не удалось изменить автозапуск"
+            alert.informativeText = "\(error.localizedDescription)\nПриложение должно лежать в «Программах» или «Программах» пользователя."
+            alert.runModal()
+        }
+    }
+}
+
+/// Установка и удаление хуков в ~/.claude/settings.json с показом точной разницы.
+@MainActor
+final class HooksController {
+    private let settingsPath = NSHomeDirectory() + "/.claude/settings.json"
+
+    private var bundledBridge: URL? {
+        Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("topbar-hook")
+    }
+
+    func statusText() -> String {
+        let data = SettingsFile.read(settingsPath)
+        guard HookInstaller.isInstalled(in: data) else { return "не установлены" }
+        let missing = HookInstaller.bridgePaths(in: data).contains { !FileManager.default.isExecutableFile(atPath: $0) }
+        return missing ? "установлены, но моста нет по пути" : "установлены"
+    }
+
+    func isInstalledAndHealthy() -> Bool { statusText() == "установлены" }
+
+    func install() {
+        guard let bridge = bundledBridge, FileManager.default.isExecutableFile(atPath: bridge.path) else {
+            return alert("Не найден мост хука", "Файл topbar-hook должен лежать рядом с приложением.")
+        }
+        let old = SettingsFile.read(settingsPath)
+        let new: Data
+        do { new = try HookInstaller.install(into: old, bridgePath: Paths.bridgeInstallPath) } catch {
+            return alert("Не удалось подготовить хуки", "Файл настроек имеет неожиданный вид (\(error)). Ничего не изменено.")
+        }
+        var text = HookInstaller.diff(old: old, new: new)
+        if HookInstaller.willReformat(old) {
+            text = "ВНИМАНИЕ: файл будет переформатирован — ключи отсортируются, отступы станут единообразными.\n\n" + text
+        }
+        guard confirm(title: "Вписать хуки в \(settingsPath)?", details: text, button: "Вписать хуки") else { return }
+        do {
+            try copyBridge(from: bridge)
+            try FileManager.default.createDirectory(atPath: (settingsPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try SettingsFile.write(new, to: settingsPath)
+        } catch {
+            alert("Не удалось записать хуки", error.localizedDescription)
+        }
+    }
+
+    func remove() {
+        guard let old = SettingsFile.read(settingsPath), HookInstaller.isInstalled(in: old) else {
+            return alert("Хуков topbar нет", "В настройках Claude Code нечего убирать.")
+        }
+        do {
+            let new = try HookInstaller.remove(from: old)
+            var text = HookInstaller.diff(old: old, new: new)
+            if HookInstaller.willReformat(old) { text = "ВНИМАНИЕ: файл будет переформатирован.\n\n" + text }
+            guard confirm(title: "Убрать хуки topbar из \(settingsPath)?", details: text, button: "Убрать хуки") else { return }
+            try SettingsFile.write(new, to: settingsPath)
+        } catch {
+            alert("Не удалось убрать хуки", error.localizedDescription)
+        }
+    }
+
+    private func copyBridge(from source: URL) throws {
+        let target = Paths.bridgeInstallPath
+        let fm = FileManager.default
+        try fm.createDirectory(atPath: (target as NSString).deletingLastPathComponent,
+                               withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        if fm.fileExists(atPath: target) { try fm.removeItem(atPath: target) }
+        try fm.copyItem(atPath: source.path, toPath: target)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target)
+    }
+
+    private func confirm(title: String, details: String, button: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = "Изменения в файле (+ добавится, − уберётся):"
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 620, height: 280))
+        scroll.hasVerticalScroller = true
+        let textView = NSTextView(frame: scroll.bounds)
+        textView.isEditable = false
+        textView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        textView.string = details
+        scroll.documentView = textView
+        alert.accessoryView = scroll
+        alert.addButton(withTitle: button)
+        alert.addButton(withTitle: "Отмена")
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func alert(_ title: String, _ text: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = text
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+}

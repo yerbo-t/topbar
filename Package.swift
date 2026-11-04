@@ -8,11 +8,13 @@ let package = Package(
         .library(name: "TopbarCore", targets: ["TopbarCore"]),
         .executable(name: "topbar-hook", targets: ["topbar-hook"]),
         .executable(name: "topbar-dev", targets: ["topbar-dev"]),
+        .executable(name: "topbar", targets: ["topbar"]),
     ],
     targets: [
         .target(name: "TopbarCore"),
         .executableTarget(name: "topbar-hook", dependencies: ["TopbarCore"]),
         .executableTarget(name: "topbar-dev", dependencies: ["TopbarCore"]),
+        .executableTarget(name: "topbar", dependencies: ["TopbarCore"]),
         .testTarget(name: "TopbarCoreTests", dependencies: ["TopbarCore"]),
     ]
 )
