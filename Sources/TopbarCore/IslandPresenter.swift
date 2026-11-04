@@ -69,18 +69,21 @@ public struct IslandPresenter {
 
     // MARK: сводка
 
-    /// «1 ждёт · 1 работает · 1 готово»; нули опускаются, простаивающие не показываются.
+    /// «1 ждёт · 1 готово · 2 работает»; нули опускаются. Простаивающие показываются, только если больше нечего
+    /// показать («2 простаивает»), иначе остров был бы пустой чёрной плашкой.
     public var summaryParts: [(status: SessionStatus, text: String)] {
         var counts: [SessionStatus: Int] = [:]
         for s in sessions { counts[s.status, default: 0] += 1 }
         func part(_ status: SessionStatus, _ word: (Int) -> String) -> (SessionStatus, String)? {
             counts[status].map { (status, word($0)) }
         }
-        return [
+        let active = [
             part(.waitingPermission) { "\($0) ждёт" },
             part(.done) { "\($0) готово" },
             part(.working) { "\($0) работает" },
         ].compactMap { $0 }
+        if active.isEmpty, let idle = part(.idle, { "\($0) простаивает" }) { return [idle] }
+        return active
     }
 
     public var summaryText: String { summaryParts.map(\.text).joined(separator: " · ") }

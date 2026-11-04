@@ -87,8 +87,8 @@ final class IslandPresenterTests: XCTestCase {
         ])
         XCTAssertEqual(presenter.summaryText, "1 ждёт · 1 готово · 2 работает")
         XCTAssertEqual(presenter.topStatus, .waitingPermission)
-        presenter.update(sessions: [session("d", .idle)])
-        XCTAssertEqual(presenter.summaryText, "")
+        presenter.update(sessions: [session("d", .idle), session("e", .idle)])
+        XCTAssertEqual(presenter.summaryText, "2 простаивает", "когда больше нечего показать, остров не пустой")
         XCTAssertEqual(presenter.topStatus, .idle)
     }
 
