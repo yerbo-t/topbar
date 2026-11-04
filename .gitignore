@@ -11,3 +11,7 @@ DerivedData/
 /dist/
 *.app
 *.dmg
+
+# SwiftPM
+.build/
+.swiftpm/
