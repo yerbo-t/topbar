@@ -31,14 +31,6 @@ func value(after flag: String, in args: [String]) -> String? {
     return args[i + 1]
 }
 
-/// Запись в settings.json: симлинк сохраняется (пишем в его цель), права файла сохраняются.
-func writeSettings(_ data: Data, to path: String) throws {
-    let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
-    let mode = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.posixPermissions]
-    try data.write(to: url, options: .atomic)
-    if let mode { try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: url.path) }
-}
-
 let args = Array(CommandLine.arguments.dropFirst())
 guard let command = args.first else { usage() }
 
@@ -121,7 +113,7 @@ case "install-bridge":
 
 case "install", "uninstall", "status":
     guard let settings = value(after: "--settings", in: args) else { usage() }
-    let old = FileManager.default.contents(atPath: URL(fileURLWithPath: settings).resolvingSymlinksInPath().path)
+    let old = SettingsFile.read(settings)
     do {
         switch command {
         case "status":
@@ -144,12 +136,12 @@ case "install", "uninstall", "status":
                 print("\nЗаписать в \(settings)? [y/N] ", terminator: "")
                 guard readLine()?.lowercased() == "y" else { print("отменено"); exit(0) }
             }
-            try writeSettings(new, to: settings)
+            try SettingsFile.write(new, to: settings)
             print("хуки вписаны")
         default:
             guard let old else { fail("нет файла \(settings)") }
             let new = try HookInstaller.remove(from: old)
-            try writeSettings(new, to: settings)
+            try SettingsFile.write(new, to: settings)
             print("хуки убраны")
         }
     } catch HookInstaller.InstallError.unexpectedShape(let key) {
