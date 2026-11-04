@@ -8,22 +8,27 @@
 
 **Tech Stack:** Swift 6.4 (режим языка 5, `swift-tools-version: 5.10`), SwiftPM, XCTest, Foundation + Darwin (POSIX-сокеты, `sysctl`, `poll`), macOS 14+.
 
-**Спека:** `docs/specs/2026-11-03-topbar-mvp.md` (утверждена 2026-11-04).
+**Спека:** `docs/specs/2026-11-03-topbar-mvp.md` (утверждена 2026-11-04; уточнена после ревью плана).
 
 ---
 
 ## Границы этого плана
 
-Часть 1 (этот файл) даёт всё, что не требует окна. Часть 2 (оверлей на вырезе, карточка, иконка в строке меню, звук, переход к сессии, определение «владелец смотрит», запуск при входе, сон/смена экрана, сборка `.app`) пишется отдельным планом **после** того, как часть 1 пройдёт проверку на настоящих сессиях: оверлею нужны подтверждённые факты (см. задачу 9), а не догадки. Это делит работу на два самостоятельно проверяемых куска, как требует скилл.
+Часть 1 (этот файл) даёт всё, что не требует окна. Часть 2 (оверлей на вырезе, карточка, иконка в строке меню, звук, переход к сессии, определение «владелец смотрит», запуск при входе, сон/смена экрана, сборка `.app`) пишется отдельным планом **после** того, как часть 1 пройдёт проверку на настоящих сессиях: оверлею нужны подтверждённые факты (задача 9), а не догадки.
 
-**Отличия от спеки, которые план вводит осознанно:**
+**Что часть 2 получит готовым от части 1:** `SessionHub` с колбэками (`onChange`, `onRequestOpened`, `onRequestClosed`, `onSessionDone`), `decide(requestId:allow:completion:)`, `autoOpenPolicy` (раскрывать ли остров сам), `releaseAllCards()` (для сна и закрытой крышки), `markViewed`, снимок сессий с полным вводом запросов, терминалом и признаками окна.
+
+**Решения плана, отличающиеся от первоначальной спеки (спека обновлена):**
 - Событие `Notification` не подписываем: в переходах оно не участвует, а каждая подписка — лишний запуск процесса.
-- Тайм-аут хуков, кроме `PermissionRequest`, — 5 с (мост сам выходит за 0,3 с); для `PermissionRequest` — 600 с (потолок на случай, если ядро не ответит).
-- Признак «сессия без терминала» — недокументированные переменные окружения хука (`CLAUDE_CODE_SESSION_ATTENDED=0` или `CLAUDE_CODE_ENTRYPOINT=sdk…`), увиденные в Claude Code 2.1.317 при `claude -p`. На интерактивной сессии их значения проверяются в задаче 9; если они окажутся другими, правится одна функция в `BridgeRunner`.
-- Номер процесса сессии берётся из `CLAUDE_PID` (тоже недокументирован, виден в окружении хука), запасной путь — подъём по дереву процессов до `claude`.
-- Хук не несёт `tool_use_id`, поэтому `PostToolUse` закрывает первый открытый запрос **с тем же именем инструмента**. При параллельных вызовах одного инструмента возможна путаница очерёдности; для MVP принято.
+- Тайм-аут хуков, кроме `PermissionRequest`, — 5 с (мост сам выходит за 0,3 с); для `PermissionRequest` — 600 с (потолок на случай, если ядро не ответит). Побочный эффект: бюджет `SessionEnd` во всех настройках Claude Code поднимается до 60 с; на практике не заметно, потому что мост выходит за доли секунды.
+- Канал к мосту держится, пока запрос открыт, даже когда остров не раскрывается сам: опыт показал, что терминал хука не ждёт.
+- Сессии без терминала игнорируются целиком (ни строки, ни звука); вопросы `AskUserQuestion` / `ExitPlanMode` показываются как «ждёт» без кнопок.
+- Признаки «сессия без терминала» (`CLAUDE_CODE_SESSION_ATTENDED=0` или `CLAUDE_CODE_ENTRYPOINT=sdk…`) и номер процесса (`CLAUDE_PID`) — недокументированные переменные окружения хука, замеченные в Claude Code 2.1.317; их значения на интерактивной сессии проверяются в задаче 9. Запасной путь для номера — подъём по дереву до процесса `claude` / `claude.exe`; не нашли — номер 0 и проверка живости для такой сессии не применяется.
+- Привязка запроса к вызову: в `PermissionRequest` нет `tool_use_id`, поэтому он сопоставляется с `PreToolUse` по имени инструмента и отпечатку ввода; `PostToolUse` закрывает запрос по `tool_use_id` (наличие поля проверяется в задаче 9).
 
-**Что в этом плане сознательно не делается:** окно острова, звук, меню, определение «смотрит на сессию» (`cardPolicy` по умолчанию показывает всегда), запуск при входе, переход к окну сессии. Всё это — часть 2.
+**Что изменено по ревью плана свежим контекстом (12 замечаний):** прерывание и отказ в терминале (резервные правила и честный список ограничений в спеке), полный ввод запроса на карточке, мёртвые каналы и взаимоблокировки (колбэки на отдельной очереди, `decide` сообщает о доставке, `releaseAllCards`), дедупликация по паре «процесс + время старта», имена процесса `claude` / `claude.exe`, единый срок 0,3 с и неблокирующая запись в мосту, список выполняющихся вызовов вместо флага, расширенная проверка на живых сессиях, защита сокета и бережный установщик хуков.
+
+**Что в этом плане сознательно не делается:** окно острова, звук, меню, определение «смотрит на сессию» (`autoOpenPolicy` по умолчанию раскрывает всегда), запуск при входе, переход к окну сессии. Всё это — часть 2.
 
 ## Структура файлов
 
@@ -32,13 +37,13 @@ Package.swift
 .gitignore                                  (дописать .build/)
 Sources/TopbarCore/
   JSONValue.swift       произвольный JSON для tool_input
-  HookEvent.swift       событие хука (snake_case из stdin)
+  HookEvent.swift       событие хука (snake_case из stdin), облегчённая копия
   Wire.swift            BridgeMessage, CoreReply, кадрирование строк
   Paths.swift           каталог данных, путь сокета, путь моста
-  Session.swift         Session, PermissionRequest, Summary, PermissionPolicy, ActionDescriber
+  Session.swift         Session, RunningTool, PermissionRequest, Summary, PermissionPolicy, ActionDescriber
   SessionStore.swift    автомат статусов (чистая логика)
   BranchReader.swift    ветка из .git/HEAD (включая worktree)
-  ProcessProbe.swift    время старта, родитель, имя, живость процесса
+  ProcessProbe.swift    время старта, родитель, имя, терминал, дети, живость процесса
   Sockets.swift         SocketClient (мост) и SocketServer (ядро)
   BridgeRunner.swift    логика моста
   HookInstaller.swift   вписать/убрать хуки в settings.json
@@ -66,7 +71,7 @@ Expected: `Switched to a new branch 'feat/core-bridge'` (от `feat/discovery`, 
 - [ ] **Step 2: Проверить, что Xcode и Swift согласованы**
 
 Run: `xcodebuild -version && swift --version && swift package --version`
-Expected: `Xcode 27.x`, `Apple Swift version 6.4.x`, `Swift Package Manager - Swift 6.4.x`. Если вместо этого `You have not agreed to the Xcode license` — попросить владельца выполнить в обычном терминале `sudo xcodebuild -license accept`.
+Expected: `Xcode 27.x`, `Apple Swift version 6.4.x`, `Swift Package Manager - Swift 6.4.x`. Если вместо этого `You have not agreed to the Xcode license` — попросить владельца выполнить в обычном терминале (не через `!`) `sudo xcodebuild -license accept`.
 
 ---
 
@@ -143,6 +148,9 @@ enum Fx {
         interrupt: Bool? = nil,
         mode: String? = "default",
         pid: Int32 = 4242,
+        started: Double? = 1000,
+        toolUseId: String? = nil,
+        agentType: String? = nil,
         root: String = "/work/topbar",
         term: String? = "ghostty",
         unattended: Bool = false
@@ -150,8 +158,9 @@ enum Fx {
         BridgeMessage(
             requestId: req,
             event: HookEvent(name, sessionId: sid, cwd: root, source: source, toolName: tool,
-                             toolInput: input, permissionMode: mode, isInterrupt: interrupt),
-            pid: pid, processStartedAt: 1000, termProgram: term, projectDir: root, unattended: unattended
+                             toolInput: input, permissionMode: mode, isInterrupt: interrupt,
+                             toolUseId: toolUseId, agentType: agentType),
+            pid: pid, processStartedAt: started, termProgram: term, projectDir: root, unattended: unattended
         )
     }
 
@@ -209,6 +218,28 @@ final class HookEventTests: XCTestCase {
         XCTAssertEqual(data.last, 0x0A)
         let back = try Wire.decode(BridgeMessage.self, line: data.dropLast())
         XCTAssertEqual(back, m)
+    }
+
+    func testDecodesToolUseIdAndAgentType() throws {
+        let json = #"{"session_id":"s","hook_event_name":"PreToolUse","tool_use_id":"toolu_1","agent_type":"Explore"}"#
+        let e = try JSONDecoder().decode(HookEvent.self, from: Data(json.utf8))
+        XCTAssertEqual(e.toolUseId, "toolu_1")
+        XCTAssertEqual(e.agentType, "Explore")
+    }
+
+    func testSlimmedKeepsOnlyCommandAndPathsAndTruncates() {
+        let big = String(repeating: "x", count: 5000)
+        let input: JSONValue = .object(["command": .string(big), "content": .string(big), "file_path": .string("/a/b.txt")])
+        let e = HookEvent("PreToolUse", sessionId: "s", toolName: "Write", toolInput: input).slimmed()
+        guard case .object(let o)? = e.toolInput else { return XCTFail("нет ввода") }
+        XCTAssertEqual(Set(o.keys), ["command", "file_path"])
+        XCTAssertEqual(o["command"]?.stringValue?.count, 300)
+    }
+
+    func testSlimmedLeavesPermissionRequestUntouched() {
+        let input: JSONValue = .object(["command": .string("ls"), "content": .string("keep me")])
+        let e = HookEvent("PermissionRequest", sessionId: "s", toolName: "Write", toolInput: input)
+        XCTAssertEqual(e.slimmed(), e)
     }
 }
 ```
@@ -293,6 +324,8 @@ public struct HookEvent: Codable, Equatable, Sendable {
     public var agentId: String?
     public var isInterrupt: Bool?
     public var notificationType: String?
+    public var toolUseId: String?
+    public var agentType: String?
 
     enum CodingKeys: String, CodingKey {
         case hookEventName = "hook_event_name"
@@ -304,6 +337,8 @@ public struct HookEvent: Codable, Equatable, Sendable {
         case agentId = "agent_id"
         case isInterrupt = "is_interrupt"
         case notificationType = "notification_type"
+        case toolUseId = "tool_use_id"
+        case agentType = "agent_type"
     }
 
     public init(
@@ -317,7 +352,9 @@ public struct HookEvent: Codable, Equatable, Sendable {
         permissionMode: String? = nil,
         agentId: String? = nil,
         isInterrupt: Bool? = nil,
-        notificationType: String? = nil
+        notificationType: String? = nil,
+        toolUseId: String? = nil,
+        agentType: String? = nil
     ) {
         self.hookEventName = name
         self.sessionId = sessionId
@@ -330,6 +367,22 @@ public struct HookEvent: Codable, Equatable, Sendable {
         self.agentId = agentId
         self.isInterrupt = isInterrupt
         self.notificationType = notificationType
+        self.toolUseId = toolUseId
+        self.agentType = agentType
+    }
+
+    /// Облегчённая копия для событий, которым не нужен полный ввод инструмента:
+    /// остаются только `command` / `file_path` / `notebook_path`, обрезанные до 300 символов.
+    /// Полный ввод нужен только запросу разрешения (его владелец должен увидеть целиком).
+    public func slimmed() -> HookEvent {
+        var copy = self
+        guard hookEventName != "PermissionRequest", case .object(let object)? = toolInput else { return copy }
+        var keep: [String: JSONValue] = [:]
+        for key in ["command", "file_path", "notebook_path"] {
+            if case .string(let text)? = object[key] { keep[key] = .string(String(text.prefix(300))) }
+        }
+        copy.toolInput = .object(keep)
+        return copy
     }
 }
 ```
@@ -343,12 +396,17 @@ import Foundation
 public struct BridgeMessage: Codable, Equatable, Sendable {
     public var requestId: String
     public var event: HookEvent
+    /// Процесс `claude` сессии; 0 — не удалось определить (тогда проверка живости не применяется).
     public var pid: Int32
     public var processStartedAt: Double?
     public var termProgram: String?
     public var projectDir: String?
     /// Сессия без терминала (`claude -p`, SDK): карточки ей не нужны.
     public var unattended: Bool
+    /// Терминальное устройство процесса `claude` (например, `ttys003`) — понадобится для поиска окна.
+    public var tty: String?
+    /// Признаки окна из окружения хука (`GHOSTTY_*`, `VSCODE_*`, `ITERM_*`, `TERM_SESSION_ID`).
+    public var hints: [String: String]
 
     public init(
         requestId: String,
@@ -357,7 +415,9 @@ public struct BridgeMessage: Codable, Equatable, Sendable {
         processStartedAt: Double? = nil,
         termProgram: String? = nil,
         projectDir: String? = nil,
-        unattended: Bool = false
+        unattended: Bool = false,
+        tty: String? = nil,
+        hints: [String: String] = [:]
     ) {
         self.requestId = requestId
         self.event = event
@@ -366,6 +426,8 @@ public struct BridgeMessage: Codable, Equatable, Sendable {
         self.termProgram = termProgram
         self.projectDir = projectDir
         self.unattended = unattended
+        self.tty = tty
+        self.hints = hints
     }
 }
 
@@ -420,7 +482,7 @@ public enum Paths {
 - [ ] **Step 6: Прогнать тесты**
 
 Run: `swift test --filter HookEventTests`
-Expected: PASS — `Executed 4 tests, with 0 failures`
+Expected: PASS — `Executed 7 tests, with 0 failures`
 
 - [ ] **Step 7: Commit**
 
@@ -437,7 +499,7 @@ git commit -m "feat(core): package skeleton, hook event and wire types"
 - Create: `Sources/TopbarCore/Session.swift`, `Sources/TopbarCore/SessionStore.swift`
 - Test: `Tests/TopbarCoreTests/SessionStoreTests.swift`
 
-Автомат — чистая логика: время и ветку ему подают снаружи, поэтому он целиком проверяется без процессов и сокетов. Правила взяты из раздела «Ядро сессий» спеки; ключевые решения закреплены тестами: `compact` не сбрасывает статус, прерывание и `StopFailure` не оставляют сессию в «работает», `PostToolUse` после `Stop` не оживляет сессию, «тишина» не трогает сессию с выполняющимся инструментом.
+Автомат — чистая логика: время и ветку ему подают снаружи, поэтому он целиком проверяется без процессов и сокетов. Правила взяты из раздела «Ядро сессий» спеки; ключевые решения закреплены тестами: `compact` не сбрасывает статус; прерывание и `StopFailure` не оставляют сессию в «работает»; запоздавший `PostToolUse` не оживляет закончившуюся сессию; завершившийся вызов не закрывает чужую карточку (привязка по `tool_use_id`); быстрый вызов не снимает признак долгой команды; висящий запрос закрывается следующим инструментом сессии; прервавшаяся клавишей Esc команда определяется по отсутствию дочерних процессов; один процесс — одна сессия; запоздавший `SessionEnd` старого процесса живую запись не убирает; ввод запроса хранится целиком.
 
 - [ ] **Step 1: Написать тесты**
 
@@ -537,11 +599,11 @@ final class SessionStoreTests: XCTestCase {
     }
 
     func testUnknownSessionFirstEventCreatesItWithMatchingStatus() {
-        store.apply(Fx.msg("PermissionRequest", sid: "late", req: "r9", tool: "Bash"), now: now)
+        store.apply(Fx.msg("PermissionRequest", sid: "late", req: "r9", tool: "Bash", pid: 101), now: now)
         XCTAssertEqual(status("late"), .waitingPermission)
-        store.apply(Fx.msg("PostToolUse", sid: "other", tool: "Bash"), now: now)
+        store.apply(Fx.msg("PostToolUse", sid: "other", tool: "Bash", pid: 102), now: now)
         XCTAssertEqual(status("other"), .working)
-        store.apply(Fx.msg("Stop", sid: "third"), now: now)
+        store.apply(Fx.msg("Stop", sid: "third", pid: 103), now: now)
         XCTAssertEqual(status("third"), .done)
     }
 
@@ -571,18 +633,19 @@ final class SessionStoreTests: XCTestCase {
     }
 
     func testSummaryCountsAndTopStatusPriority() {
-        store.apply(Fx.msg("UserPromptSubmit", sid: "a"), now: now)
-        store.apply(Fx.msg("Stop", sid: "b"), now: now)
-        store.apply(Fx.msg("SessionStart", sid: "c", source: "startup"), now: now)
+        // Разные сессии — разные процессы (иначе автомат посчитает прежнюю призраком).
+        store.apply(Fx.msg("UserPromptSubmit", sid: "a", pid: 101), now: now)
+        store.apply(Fx.msg("Stop", sid: "b", pid: 102), now: now)
+        store.apply(Fx.msg("SessionStart", sid: "c", source: "startup", pid: 103), now: now)
         XCTAssertEqual(store.summary(), Summary(waiting: 0, working: 1, done: 1, idle: 1, top: .done))
-        store.apply(Fx.msg("PermissionRequest", sid: "a", req: "r", tool: "Bash"), now: now)
+        store.apply(Fx.msg("PermissionRequest", sid: "a", req: "r", tool: "Bash", pid: 101), now: now)
         XCTAssertEqual(store.summary().top, .waitingPermission)
         XCTAssertEqual(store.snapshot().first?.sessionId, "a")
     }
 
     func testDuplicateTitlesGetSuffix() {
-        store.apply(Fx.msg("UserPromptSubmit", sid: "a"), now: now)
-        store.apply(Fx.msg("UserPromptSubmit", sid: "b"), now: now.addingTimeInterval(5))
+        store.apply(Fx.msg("UserPromptSubmit", sid: "a", pid: 101), now: now)
+        store.apply(Fx.msg("UserPromptSubmit", sid: "b", pid: 102), now: now.addingTimeInterval(5))
         let titles = SessionStore.displayTitles(store.snapshot())
         XCTAssertEqual(titles["a"], "topbar · feat/x")
         XCTAssertEqual(titles["b"], "topbar · feat/x #2")
@@ -598,6 +661,117 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertFalse(PermissionPolicy.intercepts(toolName: "AskUserQuestion"))
         XCTAssertFalse(PermissionPolicy.intercepts(toolName: "ExitPlanMode"))
         XCTAssertTrue(PermissionPolicy.intercepts(toolName: "Bash"))
+    }
+
+    // MARK: привязка запросов к вызовам, параллельные инструменты
+
+    func testFinishedPreApprovedToolDoesNotCloseAnotherPendingRequest() {
+        store.apply(Fx.msg("PreToolUse", tool: "Bash", input: Fx.bash("ls"), toolUseId: "u1"), now: now)
+        store.apply(Fx.msg("PreToolUse", tool: "Bash", input: Fx.bash("rm x"), toolUseId: "u2"), now: now)
+        store.apply(Fx.msg("PermissionRequest", req: "r1", tool: "Bash", input: Fx.bash("rm x")), now: now)
+        XCTAssertEqual(store.sessions["s1"]?.queue.first?.toolUseId, "u2")
+
+        store.apply(Fx.msg("PostToolUse", tool: "Bash", toolUseId: "u1"), now: now)
+        XCTAssertEqual(store.sessions["s1"]?.queue.count, 1, "чужой PostToolUse не закрывает запрос")
+        XCTAssertEqual(status(), .waitingPermission)
+
+        let effects = store.apply(Fx.msg("PostToolUse", tool: "Bash", toolUseId: "u2"), now: now)
+        XCTAssertEqual(effects, [.requestClosed(requestId: "r1")])
+        XCTAssertEqual(status(), .working)
+    }
+
+    func testParallelToolsAreTrackedIndividually() {
+        store.apply(Fx.msg("PreToolUse", tool: "Bash", input: Fx.bash("sleep 600"), toolUseId: "u1"), now: now)
+        store.apply(Fx.msg("PreToolUse", tool: "Read", toolUseId: "u2"), now: now)
+        store.apply(Fx.msg("PostToolUse", tool: "Read", toolUseId: "u2"), now: now)
+        XCTAssertEqual(store.sessions["s1"]?.toolRunning, true, "быстрый Read не снимает признак долгой команды")
+        store.apply(Fx.msg("PostToolUse", tool: "Bash", toolUseId: "u1"), now: now)
+        XCTAssertEqual(store.sessions["s1"]?.toolRunning, false)
+    }
+
+    func testLaterPreToolUseClosesRequestsAnsweredInTerminal() {
+        store.apply(Fx.msg("PermissionRequest", req: "r1", tool: "Bash", input: Fx.bash("a")), now: now)
+        // Параллельный вызов стартует сразу: запрос ещё актуален.
+        store.apply(Fx.msg("PreToolUse", tool: "Read"), now: now.addingTimeInterval(1))
+        XCTAssertEqual(store.sessions["s1"]?.queue.count, 1)
+        // Через 5 с сессия начала новый инструмент: значит, на запрос уже ответили (например, отказом в терминале).
+        let effects = store.apply(Fx.msg("PreToolUse", tool: "Bash", input: Fx.bash("b")), now: now.addingTimeInterval(5))
+        XCTAssertEqual(effects, [.requestClosed(requestId: "r1")])
+        XCTAssertEqual(status(), .working)
+    }
+
+    func testStaleBashWithoutChildProcessesGoesIdleAfterEsc() {
+        store.apply(Fx.msg("UserPromptSubmit"), now: now)
+        store.apply(Fx.msg("PreToolUse", tool: "Bash", input: Fx.bash("sleep 600"), toolUseId: "u1"), now: now)
+        let later = now.addingTimeInterval(21)
+        XCTAssertEqual(store.sweepQuiet(now: later, hasChildProcess: { _ in true }), [], "команда ещё идёт")
+        XCTAssertEqual(store.sweepQuiet(now: later, hasChildProcess: { _ in false }), ["s1"])
+        XCTAssertEqual(status(), .idle)
+        XCTAssertEqual(store.sessions["s1"]?.toolRunning, false)
+    }
+
+    func testNonBashToolIsNotTreatedAsStaleByChildCheck() {
+        store.apply(Fx.msg("PreToolUse", tool: "WebFetch", toolUseId: "u1"), now: now)
+        XCTAssertEqual(store.sweepQuiet(now: now.addingTimeInterval(120), hasChildProcess: { _ in false }), [])
+        XCTAssertEqual(status(), .working)
+    }
+
+    // MARK: идентичность процесса
+
+    func testLateSessionEndFromOldProcessDoesNotKillResumedSession() {
+        store.apply(Fx.msg("SessionStart", source: "startup", pid: 100, started: 1000), now: now)
+        store.apply(Fx.msg("SessionStart", source: "resume", pid: 200, started: 2000), now: now)
+        XCTAssertEqual(store.sessions["s1"]?.pid, 200)
+        let effects = store.apply(Fx.msg("SessionEnd", pid: 100, started: 1000), now: now)
+        XCTAssertEqual(effects, [])
+        XCTAssertNotNil(store.sessions["s1"])
+        store.apply(Fx.msg("SessionEnd", pid: 200, started: 2000), now: now)
+        XCTAssertNil(store.sessions["s1"])
+    }
+
+    func testNewSessionOnSameProcessRemovesGhost() {
+        store.apply(Fx.msg("UserPromptSubmit", sid: "old", pid: 100, started: 1000), now: now)
+        let effects = store.apply(Fx.msg("SessionStart", sid: "new", source: "clear", pid: 100, started: 1000), now: now)
+        XCTAssertEqual(effects, [.sessionRemoved(sessionId: "old")])
+        XCTAssertNil(store.sessions["old"])
+        XCTAssertNotNil(store.sessions["new"])
+    }
+
+    func testUnknownPidNeverTriggersGhostRemoval() {
+        store.apply(Fx.msg("UserPromptSubmit", sid: "a", pid: 0, started: nil), now: now)
+        store.apply(Fx.msg("UserPromptSubmit", sid: "b", pid: 0, started: nil), now: now)
+        XCTAssertEqual(store.sessions.count, 2)
+    }
+
+    func testSessionEndForUnknownSessionIsNoop() {
+        XCTAssertEqual(store.apply(Fx.msg("SessionEnd", sid: "never-seen"), now: now), [])
+        XCTAssertTrue(store.sessions.isEmpty)
+    }
+
+    // MARK: содержимое запроса
+
+    func testRequestKeepsFullCommandAndAgentType() {
+        let command = "echo hi\nrm -rf ~/important"
+        store.apply(Fx.msg("PermissionRequest", req: "r1", tool: "Bash", input: Fx.bash(command), agentType: "general-purpose"), now: now)
+        let r = store.sessions["s1"]!.queue[0]
+        XCTAssertEqual(r.summary, "Bash: echo hi")
+        XCTAssertEqual(r.detail, command, "владелец видит всю команду, а не первую строку")
+        XCTAssertEqual(r.agentType, "general-purpose")
+        XCTAssertTrue(r.cardable)
+    }
+
+    func testVeryLongInputIsTruncatedWithNote() {
+        let command = String(repeating: "a", count: 9000)
+        store.apply(Fx.msg("PermissionRequest", req: "r1", tool: "Bash", input: Fx.bash(command)), now: now)
+        let detail = store.sessions["s1"]!.queue[0].detail
+        XCTAssertTrue(detail.hasSuffix("показано не всё"))
+        XCTAssertLessThan(detail.count, 4100)
+    }
+
+    func testQuestionToolMakesSessionWaitButWithoutCard() {
+        store.apply(Fx.msg("PermissionRequest", req: "r1", tool: "AskUserQuestion"), now: now)
+        XCTAssertEqual(status(), .waitingPermission)
+        XCTAssertFalse(store.sessions["s1"]!.queue[0].cardable)
     }
 }
 ```
@@ -628,14 +802,31 @@ public enum SessionStatus: String, Codable, Equatable, Sendable {
     }
 }
 
+/// Инструмент, который сессия начала (`PreToolUse`) и ещё не закончила (`PostToolUse`).
+public struct RunningTool: Equatable, Sendable {
+    public let toolUseId: String?
+    public let toolName: String
+    /// Отпечаток ввода (команда или путь файла): по нему запрос разрешения привязывается к вызову,
+    /// потому что в `PermissionRequest` нет `tool_use_id`.
+    public let fingerprint: String
+    public let startedAt: Date
+}
+
 public struct PermissionRequest: Equatable, Sendable {
     public let requestId: String
     public let sessionId: String
     public let toolName: String
-    /// Короткое описание того, что просит инструмент (для карточки).
+    /// Одна строка для списка («Bash: pnpm test»).
     public let summary: String
+    /// Полный ввод инструмента для карточки: владелец должен видеть всё, что разрешает.
+    public let detail: String
     public let agentId: String?
+    public let agentType: String?
+    /// `tool_use_id` вызова, если удалось привязать запрос к `PreToolUse`.
+    public let toolUseId: String?
     public let receivedAt: Date
+    /// false — вопросы вроде `AskUserQuestion`: сессия «ждёт», но кнопок «разрешить/отклонить» нет.
+    public let cardable: Bool
 }
 
 public struct Session: Equatable, Sendable {
@@ -648,12 +839,16 @@ public struct Session: Equatable, Sendable {
     public var pid: Int32
     public var processStartedAt: Double?
     public var hostApp: String?
+    public var tty: String?
+    public var hints: [String: String]
     public var permissionMode: String?
     public var firstSeenAt: Date
     public var lastEventAt: Date
-    public var toolRunning: Bool
+    public var running: [RunningTool]
     public var unseenDone: Bool
     public var queue: [PermissionRequest]
+
+    public var toolRunning: Bool { !running.isEmpty }
 }
 
 public struct Summary: Equatable, Sendable {
@@ -665,7 +860,7 @@ public struct Summary: Equatable, Sendable {
     public var top: SessionStatus?
 }
 
-/// Какие инструменты остров не перехватывает: кнопки «разрешить/отклонить» для них бессмысленны.
+/// Какие инструменты остров не превращает в карточку: кнопки «разрешить/отклонить» для них бессмысленны.
 public enum PermissionPolicy {
     public static let passthroughTools: Set<String> = ["AskUserQuestion", "ExitPlanMode"]
 
@@ -676,12 +871,12 @@ public enum PermissionPolicy {
 }
 
 public enum ActionDescriber {
+    /// Одна строка о вызове инструмента.
     public static func describe(toolName: String?, input: JSONValue?) -> String {
         guard let toolName else { return "" }
         switch toolName {
         case "Bash":
-            let cmd = input?["command"]?.stringValue ?? ""
-            return "Bash: " + oneLine(cmd, limit: 80)
+            return "Bash: " + oneLine(input?["command"]?.stringValue ?? "", limit: 80)
         case "Edit", "Write", "MultiEdit", "NotebookEdit", "Read":
             let path = input?["file_path"]?.stringValue ?? input?["notebook_path"]?.stringValue ?? ""
             let name = (path as NSString).lastPathComponent
@@ -691,10 +886,37 @@ public enum ActionDescriber {
         }
     }
 
+    /// Полный текст для карточки (ограничен 4000 символами; обрезка помечается).
+    public static func detail(toolName: String?, input: JSONValue?, limit: Int = 4000) -> String {
+        var text: String
+        if toolName == "Bash", let command = input?["command"]?.stringValue {
+            text = command
+        } else if let input, let data = try? Self.encoder.encode(input) {
+            text = String(decoding: data, as: UTF8.self)
+        } else {
+            text = ""
+        }
+        if text.count > limit { text = String(text.prefix(limit)) + "\n… показано не всё" }
+        return text
+    }
+
+    /// Отпечаток ввода для связи `PermissionRequest` ↔ `PreToolUse`.
+    public static func fingerprint(toolName: String?, input: JSONValue?) -> String {
+        let value = input?["command"]?.stringValue ?? input?["file_path"]?.stringValue
+            ?? input?["notebook_path"]?.stringValue ?? ""
+        return String(value.prefix(300))
+    }
+
     public static func oneLine(_ text: String, limit: Int) -> String {
         let first = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
         return first.count > limit ? String(first.prefix(limit - 1)) + "…" : first
     }
+
+    private static let encoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        return e
+    }()
 }
 ```
 
@@ -715,6 +937,11 @@ public struct SessionStore {
     public private(set) var sessions: [String: Session] = [:]
     private let branchProvider: (String) -> String?
 
+    /// Запрос, висящий дольше этого срока, закрывается следующим `PreToolUse` той же сессии:
+    /// пока диалог открыт, сессия не может начать новый инструмент (параллельные вызовы
+    /// стартуют вместе с первым, то есть в первые секунды).
+    public static let staleRequestAge: TimeInterval = 3
+
     public init(branchProvider: @escaping (String) -> String? = { _ in nil }) {
         self.branchProvider = branchProvider
     }
@@ -725,13 +952,40 @@ public struct SessionStore {
     public mutating func apply(_ msg: BridgeMessage, now: Date) -> [StoreEffect] {
         let ev = msg.event
         var effects: [StoreEffect] = []
-        let existing = sessions[ev.sessionId]
+
+        // Один процесс — одна сессия: если на тот же процесс пришла другая, прежняя уже закончилась
+        // (/clear, потерянный SessionEnd), и призрак с живым pid иначе не исчез бы.
+        if msg.pid > 0, let started = msg.processStartedAt {
+            for (id, other) in sessions where id != ev.sessionId && other.pid == msg.pid
+                && Self.sameStart(other.processStartedAt, started) {
+                effects += remove(sessionId: id)
+            }
+        }
+
+        if ev.hookEventName == "SessionEnd" {
+            // Запоздавший SessionEnd прежнего процесса (resume) не должен убивать живую запись.
+            guard var s = sessions[ev.sessionId], Self.sameProcess(s, msg) else { return effects }
+            effects += closeAll(&s)
+            sessions[ev.sessionId] = nil
+            effects.append(.sessionRemoved(sessionId: ev.sessionId))
+            return effects
+        }
+
+        var existing = sessions[ev.sessionId]
+        if var old = existing, ev.hookEventName == "SessionStart", !Self.sameProcess(old, msg) {
+            // Тот же session_id, но другой процесс (resume): прежняя запись принадлежала старому процессу.
+            effects += closeAll(&old)
+            sessions[ev.sessionId] = nil
+            existing = nil
+        }
         let isNew = existing == nil
         var s = existing ?? makeSession(msg, now: now)
 
-        s.pid = msg.pid
-        s.processStartedAt = msg.processStartedAt
+        if msg.pid > 0 { s.pid = msg.pid }
+        if let started = msg.processStartedAt { s.processStartedAt = started }
         if let host = Self.hostName(msg.termProgram) { s.hostApp = host }
+        if let tty = msg.tty { s.tty = tty }
+        if !msg.hints.isEmpty { s.hints = msg.hints }
         if let mode = ev.permissionMode { s.permissionMode = mode }
         s.lastEventAt = now
 
@@ -740,7 +994,7 @@ public struct SessionStore {
             if !isNew && ev.source != "compact" {
                 effects += closeAll(&s)
                 s.status = .idle
-                s.toolRunning = false
+                s.running = []
                 s.currentAction = ""
             }
             refreshBranch(&s)
@@ -749,37 +1003,65 @@ public struct SessionStore {
             effects += closeAll(&s)
             s.status = .working
             s.unseenDone = false
-            s.toolRunning = false
+            s.running = []
             s.currentAction = "Думает"
             refreshBranch(&s)
 
         case "PreToolUse":
-            s.toolRunning = true
+            // Сессия начала новый инструмент → висящие давно запросы уже решены в терминале.
+            let stale = s.queue.filter { now.timeIntervalSince($0.receivedAt) > Self.staleRequestAge }
+            for request in stale {
+                s.queue.removeAll { $0.requestId == request.requestId }
+                effects.append(.requestClosed(requestId: request.requestId))
+            }
+            s.running.append(RunningTool(
+                toolUseId: ev.toolUseId,
+                toolName: ev.toolName ?? "?",
+                fingerprint: ActionDescriber.fingerprint(toolName: ev.toolName, input: ev.toolInput),
+                startedAt: now))
             s.currentAction = ActionDescriber.describe(toolName: ev.toolName, input: ev.toolInput)
-            if s.queue.isEmpty { s.status = .working }
+            s.status = s.queue.isEmpty ? .working : .waitingPermission
 
         case "PermissionRequest":
+            let name = ev.toolName ?? "?"
+            let fingerprint = ActionDescriber.fingerprint(toolName: ev.toolName, input: ev.toolInput)
+            let linked = Set(s.queue.compactMap(\.toolUseId))
+            let match = s.running.last {
+                $0.toolName == name && $0.fingerprint == fingerprint && !($0.toolUseId.map(linked.contains) ?? false)
+            }
             let request = PermissionRequest(
                 requestId: msg.requestId,
                 sessionId: ev.sessionId,
-                toolName: ev.toolName ?? "?",
+                toolName: name,
                 summary: ActionDescriber.describe(toolName: ev.toolName, input: ev.toolInput),
+                detail: ActionDescriber.detail(toolName: ev.toolName, input: ev.toolInput),
                 agentId: ev.agentId,
-                receivedAt: now
+                agentType: ev.agentType,
+                toolUseId: match?.toolUseId,
+                receivedAt: now,
+                cardable: PermissionPolicy.intercepts(toolName: ev.toolName)
             )
             s.queue.append(request)
             s.status = .waitingPermission
             effects.append(.requestOpened(request))
 
         case "PostToolUse", "PostToolUseFailure":
-            s.toolRunning = false
+            if let id = ev.toolUseId, let i = s.running.firstIndex(where: { $0.toolUseId == id }) {
+                s.running.remove(at: i)
+            } else if let i = s.running.lastIndex(where: { $0.toolName == ev.toolName }) {
+                s.running.remove(at: i)
+            }
             if ev.isInterrupt == true {
                 effects += closeAll(&s)
+                s.running = []
                 s.status = .idle
                 s.currentAction = "Прервано"
             } else {
-                // В хуке нет tool_use_id: закрываем первый запрос с тем же именем инструмента.
-                if let i = s.queue.firstIndex(where: { $0.toolName == ev.toolName }) {
+                // Запрос закрываем по tool_use_id; без него — только запрос, которому id не удалось привязать,
+                // и только по имени инструмента. Завершившийся вызов без запроса чужую карточку не трогает.
+                let index = s.queue.firstIndex { $0.toolUseId != nil && $0.toolUseId == ev.toolUseId }
+                    ?? s.queue.firstIndex { $0.toolUseId == nil && $0.toolName == ev.toolName }
+                if let i = index {
                     effects.append(.requestClosed(requestId: s.queue.remove(at: i).requestId))
                 }
                 if s.status == .working || s.status == .waitingPermission || isNew {
@@ -791,7 +1073,7 @@ public struct SessionStore {
             effects += closeAll(&s)
             s.status = .done
             s.unseenDone = true
-            s.toolRunning = false
+            s.running = []
             s.currentAction = ""
             refreshBranch(&s)
             effects.append(.sessionBecameDone(sessionId: s.sessionId))
@@ -799,14 +1081,8 @@ public struct SessionStore {
         case "StopFailure":
             effects += closeAll(&s)
             s.status = .idle
-            s.toolRunning = false
+            s.running = []
             s.currentAction = "Ошибка API"
-
-        case "SessionEnd":
-            effects += closeAll(&s)
-            sessions[ev.sessionId] = nil
-            effects.append(.sessionRemoved(sessionId: ev.sessionId))
-            return effects
 
         default:
             break // Notification и прочее: только обновили lastEventAt
@@ -840,16 +1116,36 @@ public struct SessionStore {
         sessions[sessionId] = s
     }
 
-    /// «Работает», но событий нет давно и инструмент не выполняется → «простаивает».
+    /// Сессия «работает», а событий нет:
+    /// - инструментов нет и тишина дольше `quietAfter` → «простаивает»;
+    /// - идут только `Bash`, тишина дольше `staleToolAfter` и у процесса сессии нет дочерних процессов
+    ///   (команду прервали клавишей Esc: события об этом Claude Code не присылает) → «простаивает»;
+    /// - идут другие инструменты, тишина дольше `quietAfter` → «простаивает».
     @discardableResult
-    public mutating func sweepQuiet(now: Date, quietAfter: TimeInterval = 600) -> [String] {
+    public mutating func sweepQuiet(
+        now: Date,
+        quietAfter: TimeInterval = 600,
+        staleToolAfter: TimeInterval = 20,
+        hasChildProcess: (Session) -> Bool = { _ in true }
+    ) -> [String] {
         var changed: [String] = []
-        for (id, var s) in sessions where s.status == .working && !s.toolRunning
-            && now.timeIntervalSince(s.lastEventAt) > quietAfter {
-            s.status = .idle
-            s.currentAction = ""
-            sessions[id] = s
-            changed.append(id)
+        for (id, var s) in sessions where s.status == .working {
+            let quiet = now.timeIntervalSince(s.lastEventAt)
+            let stale: Bool
+            if s.running.isEmpty {
+                stale = quiet > quietAfter
+            } else if s.running.allSatisfy({ $0.toolName == "Bash" }) {
+                stale = quiet > staleToolAfter && !hasChildProcess(s)
+            } else {
+                stale = quiet > quietAfter
+            }
+            if stale {
+                s.status = .idle
+                s.running = []
+                s.currentAction = ""
+                sessions[id] = s
+                changed.append(id)
+            }
         }
         return changed
     }
@@ -914,6 +1210,19 @@ public struct SessionStore {
 
     // MARK: внутреннее
 
+    /// Тот же ли процесс; если pid или время старта неизвестны (0 / nil), считаем, что тот же.
+    static func sameProcess(_ s: Session, _ msg: BridgeMessage) -> Bool {
+        if s.pid <= 0 || msg.pid <= 0 { return true }
+        if s.pid != msg.pid { return false }
+        guard let a = s.processStartedAt, let b = msg.processStartedAt else { return true }
+        return abs(a - b) < 2
+    }
+
+    static func sameStart(_ a: Double?, _ b: Double) -> Bool {
+        guard let a else { return false }
+        return abs(a - b) < 2
+    }
+
     private func makeSession(_ msg: BridgeMessage, now: Date) -> Session {
         let root = msg.projectDir ?? msg.event.cwd ?? ""
         let name = (root as NSString).lastPathComponent
@@ -927,10 +1236,12 @@ public struct SessionStore {
             pid: msg.pid,
             processStartedAt: msg.processStartedAt,
             hostApp: nil,
+            tty: msg.tty,
+            hints: msg.hints,
             permissionMode: msg.event.permissionMode,
             firstSeenAt: now,
             lastEventAt: now,
-            toolRunning: false,
+            running: [],
             unseenDone: false,
             queue: []
         )
@@ -951,7 +1262,7 @@ public struct SessionStore {
 - [ ] **Step 4: Прогнать тесты**
 
 Run: `swift test --filter SessionStoreTests`
-Expected: PASS — `Executed 16 tests, with 0 failures`
+Expected: PASS — `Executed 28 tests, with 0 failures`
 
 - [ ] **Step 5: Commit**
 
@@ -1080,7 +1391,7 @@ git commit -m "feat(core): read git branch from HEAD, worktrees supported"
 - Create: `Sources/TopbarCore/ProcessProbe.swift`
 - Test: `Tests/TopbarCoreTests/ProcessProbeTests.swift`
 
-Живость сессии проверяется парой «pid + время старта»: тот же pid с другим временем старта — это уже чужой процесс (pid переиспользован).
+Живость сессии проверяется парой «pid + время старта»: тот же pid с другим временем старта — это уже чужой процесс (pid переиспользован). Поиск процесса сессии принимает условие по имени, потому что на этой машине встречаются оба имени: `claude` и `claude.exe`.
 
 - [ ] **Step 1: Написать тесты**
 
@@ -1125,8 +1436,23 @@ final class ProcessProbeTests: XCTestCase {
         p.arguments = ["30"]
         try p.run()
         defer { p.terminate() }
-        XCTAssertEqual(ProcessProbe.ancestorPid(named: "sleep", from: p.processIdentifier), p.processIdentifier)
-        XCTAssertNil(ProcessProbe.ancestorPid(named: "no-such-process-name", from: p.processIdentifier))
+        XCTAssertEqual(ProcessProbe.ancestorPid(matching: { $0 == "sleep" }, from: p.processIdentifier), p.processIdentifier)
+        XCTAssertNil(ProcessProbe.ancestorPid(matching: { $0 == "no-such-process-name" }, from: p.processIdentifier))
+    }
+
+    func testChildPidsListsSpawnedChild() throws {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        p.arguments = ["30"]
+        try p.run()
+        defer { p.terminate() }
+        XCTAssertTrue(ProcessProbe.childPids(of: getpid()).contains(p.processIdentifier))
+        XCTAssertTrue(ProcessProbe.childPids(of: p.processIdentifier).isEmpty)
+    }
+
+    func testTtyNameDoesNotCrashForOwnProcess() {
+        _ = ProcessProbe.ttyName(of: getpid()) // под тестами терминала может не быть
+        XCTAssertNil(ProcessProbe.ttyName(of: 999_999))
     }
 }
 ```
@@ -1171,6 +1497,14 @@ public enum ProcessProbe {
         }
     }
 
+    /// Терминальное устройство процесса («ttys003»); nil, если у процесса нет терминала.
+    public static func ttyName(of pid: Int32) -> String? {
+        guard let i = info(pid: pid) else { return nil }
+        let dev = i.kp_eproc.e_tdev
+        guard dev != -1, let c = devname(dev, mode_t(S_IFCHR)) else { return nil }
+        return String(cString: c)
+    }
+
     /// Процесс жив и это тот же процесс (время старта совпадает), а не переиспользованный pid.
     public static func isAlive(pid: Int32, startedAt: Double?) -> Bool {
         guard let started = startTime(pid: pid) else { return false }
@@ -1178,15 +1512,29 @@ public enum ProcessProbe {
         return abs(started - startedAt) < 2
     }
 
-    /// Поднимается по дереву процессов от `pid` и возвращает первого предка с таким именем.
-    public static func ancestorPid(named target: String, from pid: Int32, maxDepth: Int = 8) -> Int32? {
+    /// Первый предок (включая сам `pid`), чьё имя подходит под условие.
+    public static func ancestorPid(matching isMatch: (String) -> Bool, from pid: Int32, maxDepth: Int = 8) -> Int32? {
         var current = pid
         for _ in 0..<maxDepth {
-            if name(of: current) == target { return current }
+            if let n = name(of: current), isMatch(n) { return current }
             guard let parent = parentPid(of: current), parent > 1, parent != current else { return nil }
             current = parent
         }
         return nil
+    }
+
+    /// Дочерние процессы (по таблице процессов; для интервала в секунды этого достаточно).
+    public static func childPids(of pid: Int32) -> [Int32] {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL]
+        var size = 0
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return [] }
+        let count = size / MemoryLayout<kinfo_proc>.stride + 32
+        var buffer = [kinfo_proc](repeating: kinfo_proc(), count: count)
+        var bytes = count * MemoryLayout<kinfo_proc>.stride
+        guard sysctl(&mib, 3, &buffer, &bytes, nil, 0) == 0 else { return [] }
+        return buffer.prefix(bytes / MemoryLayout<kinfo_proc>.stride)
+            .filter { $0.kp_eproc.e_ppid == pid }
+            .map { $0.kp_proc.p_pid }
     }
 }
 ```
@@ -1194,13 +1542,13 @@ public enum ProcessProbe {
 - [ ] **Step 4: Прогнать тесты**
 
 Run: `swift test --filter ProcessProbeTests`
-Expected: PASS — `Executed 4 tests, with 0 failures`
+Expected: PASS — `Executed 6 tests, with 0 failures`
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add Sources/TopbarCore/ProcessProbe.swift Tests/TopbarCoreTests/ProcessProbeTests.swift
-git commit -m "feat(core): process start time, parent, name and liveness"
+git commit -m "feat(core): process start time, parent, name, tty, children and liveness"
 ```
 
 ---
@@ -1211,7 +1559,7 @@ git commit -m "feat(core): process start time, parent, name and liveness"
 - Create: `Sources/TopbarCore/Sockets.swift`, `Sources/TopbarCore/BridgeRunner.swift`
 - Test: `Tests/TopbarCoreTests/BridgeSocketTests.swift`
 
-Закрепляемые правила спеки: нет сокета — мост молча выходит быстро; «принято» за ≤0,3 с; решение `allow`/`deny` печатается в формате хука; `none` и закрытие сокета освобождают мост сразу, а не по тайм-ауту; права сокета только для владельца; ядро узнаёт, что мост отключился.
+Закрепляемые правила спеки: нет сокета — мост молча выходит быстро; подключение, запись и «принято» укладываются в один срок 0,3 с, в том числе при зависшем получателе и большом событии; решение `allow`/`deny` печатается в формате хука; `none` и остановка сервера освобождают мост сразу, а не по тайм-ауту; полный ввод уходит только вместе с запросом разрешения; номер процесса неизвестен → 0, а не родитель; права каталога и сокета только для владельца; живой слушатель не перехватывается, чужой файл при остановке не удаляется; ядро узнаёт, что мост отключился.
 
 - [ ] **Step 1: Написать тесты**
 
@@ -1229,7 +1577,8 @@ final class BridgeSocketTests: XCTestCase {
     }
 
     func run(_ data: Data, path: String, ack: Double = 0.3, decision: Double = 5, env: [String: String] = [:]) -> Data? {
-        BridgeRunner.run(stdin: data, environment: env, parentPid: getppid(), socketPath: path,
+        // parentPid: 1 (launchd) — предка `claude` нет, номер процесса сессии остаётся неизвестным.
+        BridgeRunner.run(stdin: data, environment: env, parentPid: 1, socketPath: path,
                          ackTimeout: ack, decisionTimeout: decision)
     }
 
@@ -1352,6 +1701,116 @@ final class BridgeSocketTests: XCTestCase {
         let attrs = try FileManager.default.attributesOfItem(atPath: path)
         XCTAssertEqual((attrs[.posixPermissions] as? Int ?? 0) & 0o077, 0)
     }
+
+    // MARK: процесс сессии, облегчение событий
+
+    func receive(_ data: Data, env: [String: String] = [:]) -> BridgeMessage? {
+        let path = Fx.socketPath()
+        let got = expectation(description: "message")
+        var received: BridgeMessage?
+        let server = SocketServer(path: path, queue: DispatchQueue(label: "t")) { msg, ch in
+            received = msg; ch.send(.ack); ch.send(.none); got.fulfill()
+        }
+        XCTAssertNoThrow(try server.start())
+        defer { server.stop() }
+        _ = run(data, path: path, env: env)
+        wait(for: [got], timeout: 2)
+        return received
+    }
+
+    func testUnknownSessionProcessGivesPidZeroNotTheParent() {
+        let msg = receive(hookJSON("Stop"))
+        XCTAssertEqual(msg?.pid, 0)
+        XCTAssertNil(msg?.processStartedAt)
+    }
+
+    func testWindowHintsAreCollectedFromEnvironment() {
+        let msg = receive(hookJSON("Stop"), env: ["GHOSTTY_RESOURCES_DIR": "/x", "VSCODE_PID": "7", "PATH": "/bin", "TERM_SESSION_ID": "w0t0p0"])
+        XCTAssertEqual(msg?.hints, ["GHOSTTY_RESOURCES_DIR": "/x", "VSCODE_PID": "7", "TERM_SESSION_ID": "w0t0p0"])
+    }
+
+    func testPlainEventsCarrySlimToolInputButPermissionRequestsKeepItAll() {
+        func data(_ name: String) -> Data {
+            let d: [String: Any] = ["hook_event_name": name, "session_id": "s1", "tool_name": "Write",
+                                    "tool_input": ["file_path": "/a.txt", "content": String(repeating: "z", count: 10_000)]]
+            return try! JSONSerialization.data(withJSONObject: d)
+        }
+        let slim = receive(data("PreToolUse"))
+        guard case .object(let a)? = slim?.event.toolInput else { return XCTFail() }
+        XCTAssertEqual(Set(a.keys), ["file_path"])
+        let full = receive(data("PermissionRequest"))
+        guard case .object(let b)? = full?.event.toolInput else { return XCTFail() }
+        XCTAssertEqual(b["content"]?.stringValue?.count, 10_000)
+    }
+
+    // MARK: надёжность сокета
+
+    func testSecondServerDoesNotHijackLiveSocket() throws {
+        let path = Fx.socketPath()
+        let first = SocketServer(path: path, queue: DispatchQueue(label: "a")) { _, ch in ch.send(.ack) }
+        try first.start()
+        defer { first.stop() }
+        let second = SocketServer(path: path, queue: DispatchQueue(label: "b")) { _, _ in }
+        XCTAssertThrowsError(try second.start()) { XCTAssertEqual($0 as? SocketError, .alreadyRunning) }
+        // Первый по-прежнему отвечает.
+        XCTAssertNil(run(hookJSON("Stop"), path: path))
+    }
+
+    func testStaleFileOnPathIsReplaced() throws {
+        let path = Fx.socketPath()
+        FileManager.default.createFile(atPath: path, contents: Data("stale".utf8))
+        let server = SocketServer(path: path, queue: DispatchQueue(label: "a")) { _, _ in }
+        XCTAssertNoThrow(try server.start())
+        server.stop()
+    }
+
+    func testStopDoesNotRemoveSocketOfAnotherInstance() throws {
+        let path = Fx.socketPath()
+        let a = SocketServer(path: path, queue: DispatchQueue(label: "a")) { _, ch in ch.send(.ack) }
+        try a.start()
+        unlink(path) // путь освободился (например, каталог почистили)
+        let b = SocketServer(path: path, queue: DispatchQueue(label: "b")) { _, ch in ch.send(.ack) }
+        try b.start()
+        defer { b.stop() }
+        a.stop()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path), "сокет второго экземпляра не должен исчезнуть")
+        XCTAssertNil(run(hookJSON("Stop"), path: path))
+    }
+
+    func testExistingDirectoryIsTightenedToOwnerOnly() throws {
+        let dir = "/tmp/tb-dir-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o755])
+        let server = SocketServer(path: dir + "/hook.sock", queue: DispatchQueue(label: "a")) { _, _ in }
+        try server.start()
+        defer { server.stop(); try? FileManager.default.removeItem(atPath: dir) }
+        let attrs = try FileManager.default.attributesOfItem(atPath: dir)
+        XCTAssertEqual((attrs[.posixPermissions] as? Int ?? 0) & 0o077, 0)
+    }
+
+    /// «Зависшее приложение»: сокет слушает, но никто не читает. Большое событие не должно держать мост.
+    func testHungReceiverDoesNotBlockBridgePastDeadline() throws {
+        let path = Fx.socketPath()
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let capacity = MemoryLayout.size(ofValue: addr.sun_path)
+        withUnsafeMutablePointer(to: &addr.sun_path) {
+            $0.withMemoryRebound(to: CChar.self, capacity: capacity) { _ = strlcpy($0, path, capacity) }
+        }
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        let bound = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        XCTAssertEqual(bound, 0)
+        XCTAssertEqual(listen(fd, 4), 0)
+        defer { close(fd); unlink(path) }
+
+        let huge = ["hook_event_name": "PermissionRequest", "session_id": "s1", "tool_name": "Write",
+                    "tool_input": ["file_path": "/a", "content": String(repeating: "q", count: 4_000_000)]] as [String: Any]
+        let started = Date()
+        XCTAssertNil(run(try JSONSerialization.data(withJSONObject: huge), path: path, ack: 0.3))
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1.5)
+    }
 }
 ```
 
@@ -1368,7 +1827,7 @@ Expected: `cannot find 'BridgeRunner' in scope`.
 import Foundation
 import Darwin
 
-public enum SocketError: Error { case pathTooLong, system(String) }
+public enum SocketError: Error, Equatable { case pathTooLong, alreadyRunning, system(String) }
 
 private func makeAddress(_ path: String) throws -> sockaddr_un {
     var addr = sockaddr_un()
@@ -1398,34 +1857,39 @@ private func setNoSigPipe(_ fd: Int32) {
 
 public enum SocketClient {
     /// Подключение с тайм-аутом. nil — сокета нет, приложение не слушает или не успело принять.
+    /// Соединение остаётся неблокирующим: все чтения и записи идут через `poll` с дедлайном.
     public static func connect(path: String, timeout: Double) -> Int32? {
         guard var addr = try? makeAddress(path) else { return nil }
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
         setNoSigPipe(fd)
-        let flags = fcntl(fd, F_GETFL)
-        _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         let rc = withSockaddr(&addr) { Darwin.connect(fd, $0, $1) }
         if rc != 0 {
             guard errno == EINPROGRESS || errno == EAGAIN else { close(fd); return nil }
             var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
-            guard poll(&pfd, 1, Int32(timeout * 1000)) > 0 else { close(fd); return nil }
+            guard poll(&pfd, 1, Int32(max(0, timeout) * 1000)) > 0 else { close(fd); return nil }
             var err: Int32 = 0
             var len = socklen_t(MemoryLayout<Int32>.size)
             getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len)
             guard err == 0 else { close(fd); return nil }
         }
-        _ = fcntl(fd, F_SETFL, flags)
         return fd
     }
 
-    public static func writeAll(_ fd: Int32, _ data: Data) -> Bool {
+    /// Записать всё до дедлайна. false — не успели (получатель завис) или соединение разорвано.
+    public static func writeAll(_ fd: Int32, _ data: Data, deadline: Date = Date().addingTimeInterval(1)) -> Bool {
         var offset = 0
         return data.withUnsafeBytes { buf -> Bool in
             while offset < buf.count {
                 let n = Darwin.write(fd, buf.baseAddress! + offset, buf.count - offset)
-                if n <= 0 { return false }
-                offset += n
+                if n > 0 { offset += n; continue }
+                if n < 0 && errno == EINTR { continue }
+                guard n < 0, errno == EAGAIN || errno == EWOULDBLOCK else { return false }
+                let remaining = deadline.timeIntervalSinceNow
+                if remaining <= 0 { return false }
+                var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+                _ = poll(&pfd, 1, Int32(min(remaining * 1000, Double(Int32.max))))
             }
             return true
         }
@@ -1444,7 +1908,11 @@ public enum SocketClient {
             if ready < 0 && errno == EINTR { continue }
             if ready <= 0 { return nil }
             let n = Darwin.read(fd, &byte, 1)
-            if n <= 0 { return nil }
+            if n == 0 { return nil }
+            if n < 0 {
+                if errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR { continue }
+                return nil
+            }
             if byte == 0x0A { return line }
             line.append(byte)
         }
@@ -1461,9 +1929,11 @@ public final class ReplyChannel {
 
     fileprivate init(fd: Int32) { self.fd = fd }
 
-    public func send(_ reply: CoreReply) {
-        guard !closed, let data = try? Wire.encode(reply) else { return }
-        _ = SocketClient.writeAll(fd, data)
+    /// true — ответ записан в соединение (получатель мог уже закрыться, но запись не упала).
+    @discardableResult
+    public func send(_ reply: CoreReply) -> Bool {
+        guard !closed, let data = try? Wire.encode(reply) else { return false }
+        return SocketClient.writeAll(fd, data)
     }
 
     fileprivate func markClosed() {
@@ -1480,6 +1950,7 @@ public final class SocketServer {
     private let queue: DispatchQueue
     private let handler: Handler
     private var listenFD: Int32 = -1
+    private var ownedInode: UInt64?
     private var acceptSource: DispatchSourceRead?
     private var connections: [Int32: Connection] = [:]
     private let maxMessageBytes = 8 * 1024 * 1024
@@ -1504,6 +1975,12 @@ public final class SocketServer {
         let dir = (path as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(
             atPath: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        chmod(dir, 0o700) // каталог мог уже существовать с другими правами
+        // Живой слушатель на этом пути — не перехватываем его сокет.
+        if let probe = SocketClient.connect(path: path, timeout: 0.2) {
+            close(probe)
+            throw SocketError.alreadyRunning
+        }
         unlink(path)
         var addr = try makeAddress(path)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -1512,6 +1989,8 @@ public final class SocketServer {
             close(fd); throw SocketError.system("bind: \(errno)")
         }
         chmod(path, 0o600)
+        var st = stat()
+        if stat(path, &st) == 0 { ownedInode = UInt64(st.st_ino) }
         guard listen(fd, 32) == 0 else { close(fd); throw SocketError.system("listen: \(errno)") }
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         listenFD = fd
@@ -1528,7 +2007,10 @@ public final class SocketServer {
             acceptSource = nil
             if listenFD >= 0 { close(listenFD); listenFD = -1 }
             for c in connections.values { finish(c) }
-            unlink(path)
+            // Удаляем только свой файл: если путь уже занял другой экземпляр, его сокет не трогаем.
+            var st = stat()
+            if let owned = ownedInode, stat(path, &st) == 0, UInt64(st.st_ino) == owned { unlink(path) }
+            ownedInode = nil
         }
     }
 
@@ -1595,7 +2077,11 @@ import Foundation
 
 /// Логика моста: прочитать событие хука, передать ядру, при запросе разрешения дождаться решения.
 public enum BridgeRunner {
+    static let claudeProcessNames: Set<String> = ["claude", "claude.exe"]
+    static let hintPrefixes = ["GHOSTTY_", "VSCODE_", "ITERM_", "WEZTERM_", "TERM_SESSION_ID", "TERM_PROGRAM_VERSION"]
+
     /// Возвращает то, что нужно напечатать в stdout хука (JSON решения), либо nil — «без решения».
+    /// Всё до получения «принято» укладывается в один общий срок `ackTimeout`.
     public static func run(
         stdin: Data,
         environment: [String: String],
@@ -1605,35 +2091,45 @@ public enum BridgeRunner {
         decisionTimeout: Double = 600,
         makeRequestId: () -> String = { UUID().uuidString }
     ) -> Data? {
-        guard let event = try? JSONDecoder().decode(HookEvent.self, from: stdin) else { return nil }
+        let deadline = Date().addingTimeInterval(ackTimeout)
+        guard let decoded = try? JSONDecoder().decode(HookEvent.self, from: stdin) else { return nil }
+        let isRequest = decoded.hookEventName == "PermissionRequest"
+        let event = decoded.slimmed()
 
-        // Процесс сессии: CLAUDE_PID, иначе первый предок с именем claude, иначе родитель.
-        let claudePid = environment["CLAUDE_PID"].flatMap { Int32($0) }
-            ?? ProcessProbe.ancestorPid(named: "claude", from: parentPid)
-            ?? parentPid
+        // Процесс сессии: CLAUDE_PID, иначе первый предок `claude` / `claude.exe`, иначе неизвестен (0).
+        // Родитель хука «на всякий случай» не берём: это может быть оболочка-посредник, которая сразу завершится.
+        let claudePid: Int32 = environment["CLAUDE_PID"].flatMap { Int32($0) }
+            ?? ProcessProbe.ancestorPid(matching: { claudeProcessNames.contains($0) }, from: parentPid)
+            ?? 0
 
         let unattended = environment["CLAUDE_CODE_SESSION_ATTENDED"] == "0"
             || (environment["CLAUDE_CODE_ENTRYPOINT"]?.hasPrefix("sdk") ?? false)
+
+        let hints = environment
+            .filter { key, _ in hintPrefixes.contains { key.hasPrefix($0) } }
+            .mapValues { String($0.prefix(200)) }
 
         let message = BridgeMessage(
             requestId: makeRequestId(),
             event: event,
             pid: claudePid,
-            processStartedAt: ProcessProbe.startTime(pid: claudePid),
+            processStartedAt: claudePid > 0 ? ProcessProbe.startTime(pid: claudePid) : nil,
             termProgram: environment["TERM_PROGRAM"],
             projectDir: environment["CLAUDE_PROJECT_DIR"],
-            unattended: unattended
+            unattended: unattended,
+            tty: claudePid > 0 ? ProcessProbe.ttyName(of: claudePid) : nil,
+            hints: hints
         )
 
-        guard let fd = SocketClient.connect(path: socketPath, timeout: ackTimeout),
-              let payload = try? Wire.encode(message),
-              SocketClient.writeAll(fd, payload) else { return nil }
+        guard let fd = SocketClient.connect(path: socketPath, timeout: deadline.timeIntervalSinceNow) else { return nil }
         defer { close(fd) }
+        guard let payload = try? Wire.encode(message),
+              SocketClient.writeAll(fd, payload, deadline: deadline) else { return nil }
 
-        guard let ackLine = SocketClient.readLine(fd, timeout: ackTimeout),
+        guard let ackLine = SocketClient.readLine(fd, timeout: max(0.01, deadline.timeIntervalSinceNow)),
               (try? Wire.decode(CoreReply.self, line: ackLine))?.kind == .ack else { return nil }
 
-        guard event.hookEventName == "PermissionRequest" else { return nil }
+        guard isRequest else { return nil }
 
         guard let line = SocketClient.readLine(fd, timeout: decisionTimeout),
               let reply = try? Wire.decode(CoreReply.self, line: line),
@@ -1652,7 +2148,7 @@ public enum BridgeRunner {
 - [ ] **Step 4: Прогнать тесты**
 
 Run: `swift test --filter BridgeSocketTests`
-Expected: PASS — `Executed 9 tests, with 0 failures`
+Expected: PASS — `Executed 17 tests, with 0 failures`
 
 - [ ] **Step 5: Commit**
 
@@ -1669,7 +2165,7 @@ git commit -m "feat(core): unix socket server/client and bridge runner"
 - Create: `Sources/TopbarCore/HookInstaller.swift`
 - Test: `Tests/TopbarCoreTests/HookInstallerTests.swift`
 
-Записи topbar узнаются по метке `# topbar-managed` в команде, поэтому установка повторяема, а удаление не трогает чужие хуки. Путь к мосту содержит пробел («Application Support»), поэтому он берётся в кавычки. Копий файла рядом не создаём (правило владельца): запись атомарная, а показанная перед ней разница — единственная «страховка».
+Записи topbar узнаются по метке `# topbar-managed` в команде, поэтому установка повторяема, а удаление не трогает чужие хуки. Путь к мосту содержит пробел («Application Support»), поэтому он берётся в кавычки. Установщик отказывается писать, если раздел хуков имеет неожиданный вид (чужое не затирается). Запись пересобирает файл: ключи сортируются, отступы унифицируются — `willReformat` сообщает об этом, `diff` показывает построчную разницу с реальным содержимым файла. Копий файла рядом не создаём (правило владельца): запись атомарная, сохраняет права и симлинк (это делает консоль в задаче 8).
 
 - [ ] **Step 1: Написать тесты**
 
@@ -1732,13 +2228,38 @@ final class HookInstallerTests: XCTestCase {
         XCTAssertNil(json(removed)["hooks"])
     }
 
-    func testDiffShowsOnlyAdditionsForFreshInstall() throws {
-        let old = Data(#"{"model":"opus"}"#.utf8)
+    func testDiffShowsOnlyAdditionsWhenFileIsAlreadyNormalized() throws {
+        let old = try HookInstaller.remove(from: Data(#"{"model":"opus"}"#.utf8)) // нормализованный вид
         let new = try HookInstaller.install(into: old, bridgePath: bridge)
         let diff = HookInstaller.diff(old: old, new: new)
         XCTAssertTrue(diff.contains("+ "))
         XCTAssertFalse(diff.contains("- "))
         XCTAssertTrue(diff.contains("topbar-managed"))
+        XCTAssertFalse(HookInstaller.willReformat(old))
+    }
+
+    func testDiffAndWarningShowReformattingOfHandWrittenFile() throws {
+        let old = Data("{\"zeta\": 1,   \"alpha\": 2}".utf8) // порядок и пробелы будут изменены
+        let new = try HookInstaller.install(into: old, bridgePath: bridge)
+        XCTAssertTrue(HookInstaller.willReformat(old))
+        XCTAssertTrue(HookInstaller.diff(old: old, new: new).contains("- {\"zeta\": 1,   \"alpha\": 2}"))
+    }
+
+    func testUnexpectedShapeIsRefusedInsteadOfOverwritten() {
+        let weird = Data(#"{"hooks":{"Stop":"oops"}}"#.utf8)
+        XCTAssertThrowsError(try HookInstaller.install(into: weird, bridgePath: bridge)) {
+            XCTAssertEqual($0 as? HookInstaller.InstallError, .unexpectedShape("Stop"))
+        }
+        XCTAssertThrowsError(try HookInstaller.remove(from: weird))
+        let weirdRoot = Data(#"{"hooks":[1]}"#.utf8)
+        XCTAssertThrowsError(try HookInstaller.install(into: weirdRoot, bridgePath: bridge))
+    }
+
+    func testBridgePathsAreExtractedIncludingSpacesAndQuotes() throws {
+        let tricky = "/Users/o'neil/Library/Application Support/topbar/bin/topbar-hook"
+        let installed = try HookInstaller.install(into: nil, bridgePath: tricky)
+        XCTAssertEqual(HookInstaller.bridgePaths(in: installed), [tricky])
+        XCTAssertEqual(HookInstaller.bridgePaths(in: nil), [])
     }
 
     func testRejectsNonObjectSettings() {
@@ -1770,7 +2291,11 @@ public enum HookInstaller {
         ("Stop", 5), ("StopFailure", 5), ("SessionEnd", 5),
     ]
 
-    public enum InstallError: Error { case notAnObject }
+    public enum InstallError: Error, Equatable {
+        case notAnObject
+        /// Значение хуков события имеет неожиданный вид; файл не трогаем, чтобы не затереть чужое.
+        case unexpectedShape(String)
+    }
 
     public static func command(bridgePath: String) -> String {
         let quoted = "'" + bridgePath.replacingOccurrences(of: "'", with: "'\\''") + "'"
@@ -1779,9 +2304,9 @@ public enum HookInstaller {
 
     public static func install(into data: Data?, bridgePath: String) throws -> Data {
         var root = try parse(data)
-        var hooks = root["hooks"] as? [String: Any] ?? [:]
+        var hooks = try hooksObject(root)
         for (name, timeout) in events {
-            var groups = (hooks[name] as? [[String: Any]] ?? []).compactMap(strippingManaged)
+            var groups = try groups(hooks, name).compactMap(strippingManaged)
             groups.append(["hooks": [["type": "command", "command": command(bridgePath: bridgePath), "timeout": timeout]]])
             hooks[name] = groups
         }
@@ -1791,10 +2316,10 @@ public enum HookInstaller {
 
     public static func remove(from data: Data) throws -> Data {
         var root = try parse(data)
-        guard var hooks = root["hooks"] as? [String: Any] else { return try serialize(root) }
-        for (name, value) in hooks {
-            let groups = (value as? [[String: Any]] ?? []).compactMap(strippingManaged)
-            hooks[name] = groups.isEmpty ? nil : groups
+        guard var hooks = try hooksObjectIfAny(root) else { return try serialize(root) }
+        for name in Array(hooks.keys) {
+            let remaining = try groups(hooks, name).compactMap(strippingManaged)
+            hooks[name] = remaining.isEmpty ? nil : remaining
         }
         root["hooks"] = hooks.isEmpty ? nil : hooks
         return try serialize(root)
@@ -1807,18 +2332,37 @@ public enum HookInstaller {
         }
     }
 
-    /// Построчная разница «было → стало» для показа владельцу перед записью.
+    /// Пути моста, на которые ссылаются хуки topbar (для проверки, что файл ещё существует).
+    public static func bridgePaths(in data: Data?) -> Set<String> {
+        guard let root = try? parse(data), let hooks = root["hooks"] as? [String: Any] else { return [] }
+        var result = Set<String>()
+        for value in hooks.values {
+            for group in value as? [[String: Any]] ?? [] {
+                for hook in group["hooks"] as? [[String: Any]] ?? [] where isManaged(hook) {
+                    if let command = hook["command"] as? String, let path = unquotedPath(command) { result.insert(path) }
+                }
+            }
+        }
+        return result
+    }
+
+    /// Построчная разница «как в файле сейчас → как будет записано».
     public static func diff(old: Data?, new: Data) -> String {
-        let oldLines = ((try? parse(old)).flatMap { try? serialize($0) }).map(lines) ?? []
-        let newLines = lines(new)
+        let oldLines = old.map(lines) ?? []
         var out: [String] = []
-        for change in newLines.difference(from: oldLines) {
+        for change in lines(new).difference(from: oldLines) {
             switch change {
             case .insert(_, let line, _): out.append("+ " + line)
             case .remove(_, let line, _): out.append("- " + line)
             }
         }
         return out.joined(separator: "\n")
+    }
+
+    /// Запись пересоберёт файл (отсортирует ключи, изменит отступы), даже если хуки не менялись.
+    public static func willReformat(_ old: Data?) -> Bool {
+        guard let old, !old.isEmpty, let root = try? parse(old), let normal = try? serialize(root) else { return false }
+        return normal != old
     }
 
     // MARK: внутреннее
@@ -1839,6 +2383,22 @@ public enum HookInstaller {
         try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
     }
 
+    private static func hooksObjectIfAny(_ root: [String: Any]) throws -> [String: Any]? {
+        guard let value = root["hooks"] else { return nil }
+        guard let hooks = value as? [String: Any] else { throw InstallError.unexpectedShape("hooks") }
+        return hooks
+    }
+
+    private static func hooksObject(_ root: [String: Any]) throws -> [String: Any] {
+        try hooksObjectIfAny(root) ?? [:]
+    }
+
+    private static func groups(_ hooks: [String: Any], _ name: String) throws -> [[String: Any]] {
+        guard let value = hooks[name] else { return [] }
+        guard let groups = value as? [[String: Any]] else { throw InstallError.unexpectedShape(name) }
+        return groups
+    }
+
     private static func isManaged(_ hook: [String: Any]) -> Bool {
         (hook["command"] as? String)?.contains(marker) ?? false
     }
@@ -1855,13 +2415,21 @@ public enum HookInstaller {
         group["hooks"] = rest
         return group
     }
+
+    /// Путь из команды вида `'/путь с пробелами/topbar-hook' # topbar-managed`.
+    private static func unquotedPath(_ command: String) -> String? {
+        guard command.hasPrefix("'"), let end = command.range(of: "' ", range: command.index(after: command.startIndex)..<command.endIndex)
+        else { return nil }
+        let inner = command[command.index(after: command.startIndex)..<end.lowerBound]
+        return inner.replacingOccurrences(of: "'\\''", with: "'")
+    }
 }
 ```
 
 - [ ] **Step 4: Прогнать тесты**
 
 Run: `swift test --filter HookInstallerTests`
-Expected: PASS — `Executed 7 tests, with 0 failures`
+Expected: PASS — `Executed 10 tests, with 0 failures`
 
 - [ ] **Step 5: Commit**
 
@@ -1878,7 +2446,7 @@ git commit -m "feat(core): install/remove topbar hooks in settings.json"
 - Create: `Sources/TopbarCore/SessionHub.swift`
 - Test: `Tests/TopbarCoreTests/SessionHubTests.swift`
 
-`SessionHub` — то, что часть 2 подключит к окну острова: колбэки `onChange`, `onRequestOpened`, `onRequestClosed`, `onSessionDone`, метод `decide`, настройка `cardPolicy`. Закрепляемые правила: решение с карточки доходит до моста; ответ в терминале (`PostToolUse`) закрывает карточку и освобождает мост; если карточку показывать не надо, мост освобождается сразу, а статус остаётся «ждёт разрешения»; `AskUserQuestion`/`ExitPlanMode` и сессии без терминала не перехватываются; исчезнувший процесс убирает сессию.
+`SessionHub` — то, что часть 2 подключит к окну острова. Колбэки идут на отдельную очередь (интерфейс подставит главную), поэтому из них безопасно вызывать `snapshot()`, `decide()` и прочее. Закрепляемые правила: решение с карточки доходит до моста (и отказ с текстом); ответ в терминале (`PostToolUse`) закрывает карточку и освобождает мост; запоздалое решение сообщает «не доставлено»; при `autoOpenPolicy == false` остров не раскрывается, но канал держится и ответить можно по идентификатору из снимка; отключившийся мост закрывает карточку; дубль идентификатора не крадёт чужой канал; `releaseAllCards` освобождает мосты без смены статуса; вопросы без кнопок показываются «ждёт» без карточки; сессии без терминала не видны вовсе; исчезнувший процесс убирает сессию, а сессия с неизвестным процессом не убирается; прервавшаяся команда без дочерних процессов сбрасывается.
 
 - [ ] **Step 1: Написать тесты**
 
@@ -1889,9 +2457,10 @@ import XCTest
 @testable import TopbarCore
 
 final class SessionHubTests: XCTestCase {
-    func hook(_ name: String, sid: String = "s1", tool: String? = nil, extra: [String: Any] = [:]) -> Data {
+    func hook(_ name: String, sid: String = "s1", tool: String? = nil, input: [String: Any] = ["command": "mkdir x"],
+              extra: [String: Any] = [:]) -> Data {
         var d: [String: Any] = ["hook_event_name": name, "session_id": sid, "cwd": "/work/topbar", "permission_mode": "default"]
-        if let tool { d["tool_name"] = tool; d["tool_input"] = ["command": "mkdir x"] }
+        if let tool { d["tool_name"] = tool; d["tool_input"] = input }
         extra.forEach { d[$0.key] = $0.value }
         return try! JSONSerialization.data(withJSONObject: d)
     }
@@ -1900,7 +2469,7 @@ final class SessionHubTests: XCTestCase {
         // Живой процесс сессии — сам тест: так проверка живости не уберёт сессию.
         var environment = ["CLAUDE_PID": "\(getpid())"]
         env.forEach { environment[$0.key] = $0.value }
-        return BridgeRunner.run(stdin: data, environment: environment, parentPid: getppid(),
+        return BridgeRunner.run(stdin: data, environment: environment, parentPid: 1,
                                 socketPath: path, decisionTimeout: decision)
     }
 
@@ -1908,26 +2477,117 @@ final class SessionHubTests: XCTestCase {
         SessionHub(socketPath: path, livenessInterval: 3600, branchProvider: { _ in "main" })
     }
 
+    /// Запрос разрешения в фоне: возвращает «ответ моста» через expectation.
+    func requestInBackground(_ path: String, tool: String = "Bash", sid: String = "s1",
+                             env: [String: String] = [:], timeout: Double = 20) -> (done: XCTestExpectation, output: () -> Data??) {
+        let done = expectation(description: "bridge finished")
+        var result: Data?? = .none
+        DispatchQueue.global().async {
+            result = .some(self.bridge(self.hook("PermissionRequest", sid: sid, tool: tool), path: path, env: env, decision: timeout))
+            done.fulfill()
+        }
+        return (done, { result })
+    }
+
+    func waitUntil(_ timeout: TimeInterval = 2, _ condition: () -> Bool) {
+        let end = Date().addingTimeInterval(timeout)
+        while !condition() && Date() < end { Thread.sleep(forTimeInterval: 0.01) }
+    }
+
+    func decision(_ data: Data?) -> String? {
+        guard let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let specific = obj["hookSpecificOutput"] as? [String: Any],
+              let d = specific["decision"] as? [String: Any] else { return nil }
+        return d["behavior"] as? String
+    }
+
+    // MARK: решения и закрытие карточек
+
     func testCardDecisionReachesBridgeAsAllow() throws {
         let path = Fx.socketPath()
         let hub = makeHub(path: path)
-        let opened = expectation(description: "opened")
-        hub.onRequestOpened = { req, _ in
-            hub.decide(requestId: req.requestId, allow: true)
-            opened.fulfill()
-        }
+        hub.onRequestOpened = { req, _ in hub.decide(requestId: req.requestId, allow: true) }
         try hub.start()
         defer { hub.stop() }
 
         _ = bridge(hook("UserPromptSubmit"), path: path)
         let out = bridge(hook("PermissionRequest", tool: "Bash"), path: path)
-        wait(for: [opened], timeout: 2)
-        let obj = try JSONSerialization.jsonObject(with: try XCTUnwrap(out)) as! [String: Any]
-        XCTAssertEqual(((obj["hookSpecificOutput"] as! [String: Any])["decision"] as! [String: Any])["behavior"] as? String, "allow")
+        XCTAssertEqual(decision(out), "allow")
+        hub.flush()
         XCTAssertEqual(hub.snapshot().first?.status, .working)
     }
 
+    func testDenyReachesBridgeWithMessage() throws {
+        let path = Fx.socketPath()
+        let hub = makeHub(path: path)
+        hub.onRequestOpened = { req, _ in hub.decide(requestId: req.requestId, allow: false, denyMessage: "нельзя") }
+        try hub.start()
+        defer { hub.stop() }
+        let out = bridge(hook("PermissionRequest", tool: "Bash"), path: path)
+        XCTAssertEqual(decision(out), "deny")
+        XCTAssertTrue(String(decoding: out ?? Data(), as: UTF8.self).contains("нельзя"))
+    }
+
     func testPostToolUseClosesCardAndReleasesBridge() throws {
+        let path = Fx.socketPath()
+        let hub = makeHub(path: path)
+        let closed = expectation(description: "closed")
+        hub.onRequestClosed = { _ in closed.fulfill() }
+        try hub.start()
+        defer { hub.stop() }
+
+        let pending = requestInBackground(path)
+        waitUntil { hub.snapshot().first?.status == .waitingPermission }
+        // Владелец ответил в терминале: приходит PostToolUse.
+        _ = bridge(hook("PostToolUse", tool: "Bash"), path: path)
+        wait(for: [closed, pending.done], timeout: 3)
+        XCTAssertEqual(pending.output(), .some(nil), "мост выходит без решения")
+        XCTAssertEqual(hub.snapshot().first?.status, .working)
+    }
+
+    func testDecideAfterTerminalAnswerIsReportedAsNotDelivered() throws {
+        let path = Fx.socketPath()
+        let hub = makeHub(path: path)
+        var requestId: String?
+        let opened = expectation(description: "opened")
+        hub.onRequestOpened = { r, _ in requestId = r.requestId; opened.fulfill() }
+        try hub.start()
+        defer { hub.stop() }
+        let pending = requestInBackground(path)
+        wait(for: [opened], timeout: 2)
+        _ = bridge(hook("PostToolUse", tool: "Bash"), path: path)
+        wait(for: [pending.done], timeout: 3)
+
+        let reported = expectation(description: "completion")
+        hub.decide(requestId: requestId!, allow: true) { delivered in
+            XCTAssertFalse(delivered)
+            reported.fulfill()
+        }
+        wait(for: [reported], timeout: 2)
+    }
+
+    func testAutoOpenPolicyFalseKeepsChannelSoRowClickCanStillDecide() throws {
+        let path = Fx.socketPath()
+        let hub = makeHub(path: path)
+        hub.autoOpenPolicy = { _, _ in false }   // владелец смотрит на сессию
+        var autoOpened = false
+        hub.onRequestOpened = { _, _ in autoOpened = true }
+        try hub.start()
+        defer { hub.stop() }
+
+        let pending = requestInBackground(path)
+        waitUntil { hub.snapshot().first?.queue.isEmpty == false }
+        hub.flush()
+        XCTAssertFalse(autoOpened, "остров не раскрывается сам")
+        XCTAssertEqual(hub.snapshot().first?.status, .waitingPermission)
+        // Клик по строке: карточку открывают вручную и отвечают по идентификатору из снимка.
+        let id = try XCTUnwrap(hub.snapshot().first?.queue.first?.requestId)
+        hub.decide(requestId: id, allow: true)
+        wait(for: [pending.done], timeout: 3)
+        XCTAssertEqual(decision(pending.output() ?? nil), "allow")
+    }
+
+    func testBridgeDisconnectClosesCard() throws {
         let path = Fx.socketPath()
         let hub = makeHub(path: path)
         let opened = expectation(description: "opened")
@@ -1937,34 +2597,59 @@ final class SessionHubTests: XCTestCase {
         try hub.start()
         defer { hub.stop() }
 
-        var bridgeOutput: Data?? = .none
-        let finished = expectation(description: "bridge finished")
-        DispatchQueue.global().async {
-            bridgeOutput = .some(self.bridge(self.hook("PermissionRequest", tool: "Bash"), path: path, decision: 20))
-            finished.fulfill()
-        }
+        let fd = try XCTUnwrap(SocketClient.connect(path: path, timeout: 1))
+        let msg = BridgeMessage(requestId: "dead-bridge", event: HookEvent("PermissionRequest", sessionId: "s1", cwd: "/work/topbar", toolName: "Bash", toolInput: Fx.bash("ls")), pid: getpid())
+        XCTAssertTrue(SocketClient.writeAll(fd, try Wire.encode(msg)))
+        XCTAssertNotNil(SocketClient.readLine(fd, timeout: 1))
         wait(for: [opened], timeout: 2)
-        XCTAssertEqual(hub.snapshot().first?.status, .waitingPermission)
-        // Владелец ответил в терминале: приходит PostToolUse.
-        _ = bridge(hook("PostToolUse", tool: "Bash"), path: path)
-        wait(for: [closed, finished], timeout: 3)
-        XCTAssertEqual(bridgeOutput, .some(nil), "мост выходит без решения")
-        XCTAssertEqual(hub.snapshot().first?.status, .working)
+        close(fd) // хук истёк или мост убит
+        wait(for: [closed], timeout: 2)
     }
 
-    func testCardPolicyFalseReleasesBridgeButKeepsStatusWaiting() throws {
+    func testDuplicateRequestIdIsRejectedWithoutStealingChannel() throws {
         let path = Fx.socketPath()
         let hub = makeHub(path: path)
-        hub.cardPolicy = { _, _ in false }
+        let opened = expectation(description: "opened")
+        hub.onRequestOpened = { _, _ in opened.fulfill() }
         try hub.start()
         defer { hub.stop() }
-        let started = Date()
-        XCTAssertNil(bridge(hook("PermissionRequest", tool: "Bash"), path: path, decision: 20))
-        XCTAssertLessThan(Date().timeIntervalSince(started), 3)
-        XCTAssertEqual(hub.snapshot().first?.status, .waitingPermission)
+
+        func send(_ id: String) throws -> Int32 {
+            let fd = try XCTUnwrap(SocketClient.connect(path: path, timeout: 1))
+            let msg = BridgeMessage(requestId: id, event: HookEvent("PermissionRequest", sessionId: "s1", cwd: "/work/topbar", toolName: "Bash", toolInput: Fx.bash("ls")), pid: getpid())
+            XCTAssertTrue(SocketClient.writeAll(fd, try Wire.encode(msg)))
+            XCTAssertNotNil(SocketClient.readLine(fd, timeout: 1)) // ack
+            return fd
+        }
+        let first = try send("same-id")
+        wait(for: [opened], timeout: 2)
+        let second = try send("same-id")
+        let reply = try XCTUnwrap(SocketClient.readLine(second, timeout: 1))
+        XCTAssertEqual(try Wire.decode(CoreReply.self, line: reply).kind, .none)
+        close(second)
+
+        hub.decide(requestId: "same-id", allow: true)
+        let answer = try XCTUnwrap(SocketClient.readLine(first, timeout: 2))
+        XCTAssertEqual(try Wire.decode(CoreReply.self, line: answer).behavior, "allow")
+        close(first)
     }
 
-    func testQuestionToolsAndUnattendedSessionsAreNotIntercepted() throws {
+    func testReleaseAllCardsFreesBridgesButKeepsStatus() throws {
+        let path = Fx.socketPath()
+        let hub = makeHub(path: path)
+        try hub.start()
+        defer { hub.stop() }
+        let pending = requestInBackground(path)
+        waitUntil { hub.snapshot().first?.status == .waitingPermission }
+        hub.releaseAllCards()
+        wait(for: [pending.done], timeout: 3)
+        XCTAssertEqual(pending.output(), .some(nil))
+        XCTAssertEqual(hub.snapshot().first?.status, .waitingPermission, "диалог остался в терминале")
+    }
+
+    // MARK: что не показываем карточкой
+
+    func testQuestionToolWaitsWithoutCardAndReleasesBridge() throws {
         let path = Fx.socketPath()
         let hub = makeHub(path: path)
         var opened = 0
@@ -1972,11 +2657,28 @@ final class SessionHubTests: XCTestCase {
         try hub.start()
         defer { hub.stop() }
         XCTAssertNil(bridge(hook("PermissionRequest", tool: "AskUserQuestion"), path: path))
-        XCTAssertNil(bridge(hook("PermissionRequest", sid: "bg", tool: "Bash"), path: path,
-                            env: ["CLAUDE_CODE_SESSION_ATTENDED": "0"]))
-        hub.queue.sync {}
+        hub.flush()
         XCTAssertEqual(opened, 0)
+        XCTAssertEqual(hub.snapshot().first?.status, .waitingPermission, "сессия ждёт вас, просто без кнопок")
     }
+
+    func testUnattendedSessionsAreIgnoredCompletely() throws {
+        let path = Fx.socketPath()
+        let hub = makeHub(path: path)
+        var done = 0
+        hub.onSessionDone = { _ in done += 1 }
+        try hub.start()
+        defer { hub.stop() }
+        let env = ["CLAUDE_CODE_SESSION_ATTENDED": "0"]
+        _ = bridge(hook("UserPromptSubmit", sid: "bg"), path: path, env: env)
+        XCTAssertNil(bridge(hook("PermissionRequest", sid: "bg", tool: "Bash"), path: path, env: env))
+        _ = bridge(hook("Stop", sid: "bg"), path: path, env: env)
+        hub.flush()
+        XCTAssertTrue(hub.snapshot().isEmpty, "ни строки, ни звука")
+        XCTAssertEqual(done, 0)
+    }
+
+    // MARK: прочее
 
     func testSessionBecameDoneCallbackAndViewed() throws {
         let path = Fx.socketPath()
@@ -1990,7 +2692,24 @@ final class SessionHubTests: XCTestCase {
         wait(for: [done], timeout: 2)
         XCTAssertEqual(hub.snapshot().first?.status, .done)
         hub.markViewed(sessionId: "s1")
+        hub.flush()
         XCTAssertEqual(hub.snapshot().first?.status, .idle)
+    }
+
+    func testCallbacksMayCallBackIntoHubWithoutDeadlock() throws {
+        let path = Fx.socketPath()
+        let hub = makeHub(path: path)
+        let called = expectation(description: "onChange")
+        called.assertForOverFulfill = false
+        hub.onChange = { _ in
+            _ = hub.snapshot()
+            hub.markViewed(sessionId: "s1")
+            called.fulfill()
+        }
+        try hub.start()
+        defer { hub.stop() }
+        _ = bridge(hook("UserPromptSubmit"), path: path)
+        wait(for: [called], timeout: 2)
     }
 
     func testDeadProcessIsRemovedByLivenessTick() throws {
@@ -2012,6 +2731,32 @@ final class SessionHubTests: XCTestCase {
         hub.tickNow()
         XCTAssertEqual(hub.snapshot().count, 0)
     }
+
+    func testSessionWithUnknownPidIsNeverRemovedByLiveness() throws {
+        let path = Fx.socketPath()
+        let hub = makeHub(path: path)
+        try hub.start()
+        defer { hub.stop() }
+        // CLAUDE_PID не передан, предка claude нет → pid 0.
+        _ = BridgeRunner.run(stdin: hook("UserPromptSubmit"), environment: [:], parentPid: 1, socketPath: path)
+        hub.tickNow()
+        XCTAssertEqual(hub.snapshot().count, 1)
+    }
+
+    func testBashWithoutChildProcessesIsDroppedByTickButLiveOneIsKept() throws {
+        for (hasChildren, expected) in [(false, SessionStatus.idle), (true, SessionStatus.working)] {
+            let path = Fx.socketPath()
+            let hub = SessionHub(socketPath: path, livenessInterval: 3600, staleToolAfter: 0,
+                                 branchProvider: { _ in nil }, hasChildProcess: { _ in hasChildren })
+            try hub.start()
+            defer { hub.stop() }
+            _ = bridge(hook("PreToolUse", tool: "Bash"), path: path)
+            XCTAssertEqual(hub.snapshot().first?.status, .working)
+            Thread.sleep(forTimeInterval: 0.05)
+            hub.tickNow()
+            XCTAssertEqual(hub.snapshot().first?.status, expected, "дочерние процессы: \(hasChildren)")
+        }
+    }
 }
 ```
 
@@ -2027,30 +2772,46 @@ Expected: `cannot find 'SessionHub' in scope`.
 ```swift
 import Foundation
 
-/// Склеивает сокет, автомат статусов и проверку живости. Все колбэки вызываются на `queue`.
+/// Склеивает сокет, автомат статусов и проверку живости.
+/// Внутренняя работа идёт на `queue`; все колбэки уходят на отдельную очередь `callbackQueue`
+/// (интерфейс подставит главную), поэтому из колбэка безопасно вызывать `snapshot()`, `decide()` и т. д.
 public final class SessionHub {
     public let queue = DispatchQueue(label: "topbar.hub")
+    public let callbackQueue: DispatchQueue
 
-    /// Показывать ли карточку по этому запросу. false — владелец смотрит на сессию, нет экрана и т. п.
-    public var cardPolicy: (Session, PermissionRequest) -> Bool = { _, _ in true }
+    /// Раскрывать ли остров сам по этому запросу. false (владелец смотрит на сессию, нет экрана) —
+    /// запрос всё равно остаётся в сессии, и карточку можно открыть вручную: канал к мосту держится.
+    public var autoOpenPolicy: (Session, PermissionRequest) -> Bool = { _, _ in true }
     public var onChange: (([Session]) -> Void)?
+    /// Появился запрос, который нужно показать карточкой (вопросы вроде `AskUserQuestion` сюда не попадают).
     public var onRequestOpened: ((PermissionRequest, Session) -> Void)?
+    /// Запрос закрыт (ответили в терминале, сессия закончилась, мост отключился): карточку убрать.
     public var onRequestClosed: ((String) -> Void)?
     public var onSessionDone: ((Session) -> Void)?
+    /// Каждое принятое событие (для диагностики).
+    public var onEvent: ((BridgeMessage) -> Void)?
 
     private var store: SessionStore
     private var server: SocketServer!
     private var channels: [String: ReplyChannel] = [:]
     private var timer: DispatchSourceTimer?
     private let livenessInterval: TimeInterval
+    private let hasChildProcess: (Session) -> Bool
+    private let staleToolAfter: TimeInterval
 
     public init(
         socketPath: String,
         livenessInterval: TimeInterval = 10,
-        branchProvider: @escaping (String) -> String? = BranchReader.branch(at:)
+        staleToolAfter: TimeInterval = 20,
+        callbackQueue: DispatchQueue = DispatchQueue(label: "topbar.hub.callbacks"),
+        branchProvider: @escaping (String) -> String? = BranchReader.branch(at:),
+        hasChildProcess: @escaping (Session) -> Bool = { $0.pid <= 0 || !ProcessProbe.childPids(of: $0.pid).isEmpty }
     ) {
         self.store = SessionStore(branchProvider: branchProvider)
         self.livenessInterval = livenessInterval
+        self.staleToolAfter = staleToolAfter
+        self.callbackQueue = callbackQueue
+        self.hasChildProcess = hasChildProcess
         self.server = SocketServer(path: socketPath, queue: queue) { [weak self] msg, channel in
             self?.handle(msg, channel)
         }
@@ -2071,13 +2832,38 @@ public final class SessionHub {
         server.stop()
     }
 
-    /// Ответ владельца с карточки.
-    public func decide(requestId: String, allow: Bool, denyMessage: String = "Отклонено в topbar") {
+    /// Ответ владельца с карточки. `completion(true)` — решение доставлено мосту;
+    /// `false` — запрос уже закрыт (ответили в терминале) или мост ушёл. Вызывается на `callbackQueue`.
+    public func decide(
+        requestId: String,
+        allow: Bool,
+        denyMessage: String = "Отклонено в topbar",
+        completion: ((Bool) -> Void)? = nil
+    ) {
         queue.async { [self] in
-            guard let channel = channels.removeValue(forKey: requestId) else { return } // уже закрыт
-            channel.send(allow ? .allow() : .deny(denyMessage))
-            store.resolve(requestId: requestId)
-            notifyChange()
+            guard let channel = channels.removeValue(forKey: requestId) else {
+                emit { completion?(false) }
+                return
+            }
+            let delivered = channel.send(allow ? .allow() : .deny(denyMessage))
+            if delivered {
+                store.resolve(requestId: requestId)
+                notifyChange()
+            } else {
+                emit { self.onRequestClosed?(requestId) }
+            }
+            emit { completion?(delivered) }
+        }
+    }
+
+    /// Закрыть все карточки без решения (сон, закрытая крышка, пропал экран с вырезом):
+    /// диалоги остаются в терминалах, статусы сессий не меняются.
+    public func releaseAllCards() {
+        queue.async { [self] in
+            let ids = Array(channels.keys)
+            for (_, channel) in channels { channel.send(.none) }
+            channels = [:]
+            for id in ids { emit { self.onRequestClosed?(id) } }
         }
     }
 
@@ -2093,73 +2879,96 @@ public final class SessionHub {
     /// Для тестов и диагностики: выполнить проверку живости немедленно.
     public func tickNow() { queue.sync { tick() } }
 
+    /// Для тестов: дождаться, пока обработаны очередь хаба и уже поставленные колбэки.
+    public func flush() {
+        queue.sync {}
+        callbackQueue.sync {}
+    }
+
     // MARK: внутреннее (всё на queue)
+
+    private func emit(_ block: @escaping () -> Void) { callbackQueue.async(execute: block) }
 
     private func handle(_ msg: BridgeMessage, _ channel: ReplyChannel) {
         channel.send(.ack)
         let ev = msg.event
         let isRequest = ev.hookEventName == "PermissionRequest"
+        emit { self.onEvent?(msg) }
 
-        // Сессии без терминала и инструменты-вопросы не перехватываем: решение остаётся у Claude Code.
-        if isRequest && (msg.unattended || !PermissionPolicy.intercepts(toolName: ev.toolName)) {
+        // Сессии без терминала (`claude -p`, SDK, cron) не показываем вовсе: ни строк, ни звука,
+        // а запрос остаётся за Claude Code.
+        if msg.unattended {
+            if isRequest { channel.send(.none) }
+            return
+        }
+        // Идентификатор выбирает мост; дубль не должен затирать чужой канал.
+        if isRequest && channels[msg.requestId] != nil {
             channel.send(.none)
             return
         }
 
         let effects = store.apply(msg, now: Date())
 
+        var opened: (PermissionRequest, Session)?
         if isRequest {
             if let session = store.sessions[ev.sessionId],
                let request = session.queue.first(where: { $0.requestId == msg.requestId }),
-               cardPolicy(session, request) {
+               request.cardable {
                 channels[request.requestId] = channel
-                channel.onClose = { [weak self] in self?.channels[request.requestId] = nil }
+                channel.onClose = { [weak self] in self?.channelClosed(request.requestId) }
+                if autoOpenPolicy(session, request) { opened = (request, session) }
             } else {
-                channel.send(.none)
+                channel.send(.none) // вопрос без кнопок или запрос не попал в автомат
             }
         }
 
         for effect in effects {
             switch effect {
-            case .requestOpened(let request):
-                if channels[request.requestId] != nil, let s = store.sessions[request.sessionId] {
-                    onRequestOpened?(request, s)
-                }
             case .requestClosed(let id):
                 channels.removeValue(forKey: id)?.send(.none)
-                onRequestClosed?(id)
+                emit { self.onRequestClosed?(id) }
             case .sessionBecameDone(let id):
-                if let s = store.sessions[id] { onSessionDone?(s) }
-            case .sessionRemoved:
+                if let s = store.sessions[id] { emit { self.onSessionDone?(s) } }
+            case .requestOpened, .sessionRemoved:
                 break
             }
         }
+        if let (request, session) = opened { emit { self.onRequestOpened?(request, session) } }
         notifyChange()
+    }
+
+    /// Мост отключился (хук истёк, процесс убит): кнопки на карточке уже бесполезны.
+    private func channelClosed(_ requestId: String) {
+        guard channels.removeValue(forKey: requestId) != nil else { return }
+        emit { self.onRequestClosed?(requestId) }
     }
 
     private func tick() {
         var changed = false
-        for s in store.sessions.values where !ProcessProbe.isAlive(pid: s.pid, startedAt: s.processStartedAt) {
+        for s in store.sessions.values where s.pid > 0 && !ProcessProbe.isAlive(pid: s.pid, startedAt: s.processStartedAt) {
             for effect in store.remove(sessionId: s.sessionId) {
                 if case .requestClosed(let id) = effect {
                     channels.removeValue(forKey: id)?.send(.none)
-                    onRequestClosed?(id)
+                    emit { self.onRequestClosed?(id) }
                 }
             }
             changed = true
         }
-        if !store.sweepQuiet(now: Date()).isEmpty { changed = true }
+        if !store.sweepQuiet(now: Date(), staleToolAfter: staleToolAfter, hasChildProcess: hasChildProcess).isEmpty { changed = true }
         if changed { notifyChange() }
     }
 
-    private func notifyChange() { onChange?(store.snapshot()) }
+    private func notifyChange() {
+        let sessions = store.snapshot()
+        emit { self.onChange?(sessions) }
+    }
 }
 ```
 
-- [ ] **Step 4: Прогнать весь набор**
+- [ ] **Step 4: Прогнать весь набор три раза подряд (тесты используют потоки и время)**
 
-Run: `swift test 2>&1 | grep -E "Executed|error" | tail -3`
-Expected: `Executed 50 tests, with 0 failures`.
+Run: `for i in 1 2 3; do swift test 2>&1 | grep -E "error:|failed|Executed 87"; done | sort | uniq -c`
+Expected: только строки `Executed 87 tests, with 0 failures`, без `error:` и `failed`.
 
 - [ ] **Step 5: Commit**
 
@@ -2175,7 +2984,7 @@ git commit -m "feat(core): session hub wiring socket, store and liveness"
 **Files:**
 - Modify: `Sources/topbar-hook/main.swift`, `Sources/topbar-dev/main.swift` (заменить заглушки)
 
-Исполняемые файлы только вызывают проверенную логику из `TopbarCore`, поэтому своих юнит-тестов у них нет: их проверяет задача 9.
+Исполняемые файлы только вызывают проверенную логику из `TopbarCore`, поэтому своих юнит-тестов у них нет: их проверяет задача 9. Консоль печатает ввод запроса **целиком**, показывает субагента, сообщает «не доставлено» вместо ложного «разрешено», сохраняет симлинк и права `settings.json` при записи и предупреждает о переформатировании файла.
 
 - [ ] **Step 1: Заменить заглушки настоящим кодом**
 
@@ -2214,16 +3023,17 @@ func fail(_ text: String) -> Never {
 
 func usage() -> Never {
     print("""
-    topbar-dev run
-        слушать хуки и показывать сессии; на запрос разрешения отвечать y (разрешить) или n (отклонить)
+    topbar-dev run [--verbose]
+        слушать хуки и показывать сессии; на запрос разрешения отвечать y (разрешить) или n (отклонить);
+        --verbose печатает каждое событие (есть ли tool_use_id, терминал, признаки окна)
     topbar-dev install-bridge --from <путь к topbar-hook>
         скопировать мост в стабильное место
     topbar-dev install --settings <settings.json> [--yes]
-        показать, что допишется, и вписать хуки
+        показать, что изменится в файле, и вписать хуки
     topbar-dev uninstall --settings <settings.json>
         убрать хуки topbar
     topbar-dev status --settings <settings.json>
-        установлены ли хуки
+        установлены ли хуки и существует ли мост, на который они ссылаются
     """)
     exit(2)
 }
@@ -2233,17 +3043,28 @@ func value(after flag: String, in args: [String]) -> String? {
     return args[i + 1]
 }
 
+/// Запись в settings.json: симлинк сохраняется (пишем в его цель), права файла сохраняются.
+func writeSettings(_ data: Data, to path: String) throws {
+    let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+    let mode = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.posixPermissions]
+    try data.write(to: url, options: .atomic)
+    if let mode { try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: url.path) }
+}
+
 let args = Array(CommandLine.arguments.dropFirst())
 guard let command = args.first else { usage() }
 
 switch command {
 case "run":
+    let verbose = args.contains("--verbose")
     let hub = SessionHub(socketPath: Paths.socketPath)
-    var open: [PermissionRequest] = []   // трогаем только на hub.queue
+    var open: [PermissionRequest] = []   // трогаем только на hub.callbackQueue
+    let out = hub.callbackQueue
 
     hub.onRequestOpened = { request, session in
         open.append(request)
-        print("\n? [\(session.project)] \(request.summary)\n  ответ: y — разрешить, n — отклонить")
+        let agent = request.agentType.map { " (субагент \($0))" } ?? ""
+        print("\n? [\(session.project)]\(agent) \(request.toolName):\n\(request.detail)\n  ответ: y — разрешить, n — отклонить")
         fflush(stdout)
     }
     hub.onRequestClosed = { id in
@@ -2252,6 +3073,11 @@ case "run":
     }
     hub.onSessionDone = { session in
         print("\u{7}✓ готово: \(session.project)")
+    }
+    hub.onEvent = { msg in
+        guard verbose else { return }
+        let e = msg.event
+        print("  · \(e.hookEventName) tool=\(e.toolName ?? "-") tool_use_id=\(e.toolUseId ?? "нет") pid=\(msg.pid) tty=\(msg.tty ?? "-") term=\(msg.termProgram ?? "-") unattended=\(msg.unattended) hints=\(msg.hints)")
     }
     hub.onChange = { sessions in
         let titles = SessionStore.displayTitles(sessions)
@@ -2269,18 +3095,23 @@ case "run":
         }
         fflush(stdout)
     }
-    do { try hub.start() } catch { fail("не удалось открыть сокет \(Paths.socketPath): \(error)") }
+    do { try hub.start() } catch SocketError.alreadyRunning {
+        fail("сокет \(Paths.socketPath) уже слушает другой экземпляр")
+    } catch { fail("не удалось открыть сокет \(Paths.socketPath): \(error)") }
     print("слушаю \(Paths.socketPath)")
 
     Thread.detachNewThread {
         while let line = readLine() {
             let answer = line.trimmingCharacters(in: .whitespaces).lowercased()
             guard answer == "y" || answer == "n" else { continue }
-            hub.queue.async {
+            out.async {
                 guard let request = open.first else { print("  (нет открытых запросов)"); return }
                 open.removeFirst()
-                hub.decide(requestId: request.requestId, allow: answer == "y")
-                print("  → \(answer == "y" ? "разрешено" : "отклонено"): \(request.summary)")
+                hub.decide(requestId: request.requestId, allow: answer == "y") { delivered in
+                    print(delivered
+                        ? "  → \(answer == "y" ? "разрешено" : "отклонено"): \(request.summary)"
+                        : "  → не доставлено (запрос уже закрыт): \(request.summary)")
+                }
             }
         }
     }
@@ -2301,29 +3132,39 @@ case "install-bridge":
 
 case "install", "uninstall", "status":
     guard let settings = value(after: "--settings", in: args) else { usage() }
-    let old = FileManager.default.contents(atPath: settings)
+    let old = FileManager.default.contents(atPath: URL(fileURLWithPath: settings).resolvingSymlinksInPath().path)
     do {
         switch command {
         case "status":
-            print(HookInstaller.isInstalled(in: old) ? "хуки установлены" : "хуки не установлены")
+            guard HookInstaller.isInstalled(in: old) else { print("хуки не установлены"); break }
+            print("хуки установлены")
+            for path in HookInstaller.bridgePaths(in: old).sorted() {
+                let exists = FileManager.default.isExecutableFile(atPath: path)
+                print(exists ? "  мост на месте: \(path)" : "  ВНИМАНИЕ: моста нет по пути \(path) — каждое событие будет падать с ошибкой")
+            }
         case "install":
             guard FileManager.default.isExecutableFile(atPath: Paths.bridgeInstallPath) else {
                 fail("сначала: topbar-dev install-bridge --from <путь к topbar-hook>")
             }
             let new = try HookInstaller.install(into: old, bridgePath: Paths.bridgeInstallPath)
+            if HookInstaller.willReformat(old) {
+                print("ВНИМАНИЕ: файл будет переформатирован — ключи отсортируются, отступы станут единообразными.")
+            }
             print(HookInstaller.diff(old: old, new: new))
             if !args.contains("--yes") {
                 print("\nЗаписать в \(settings)? [y/N] ", terminator: "")
                 guard readLine()?.lowercased() == "y" else { print("отменено"); exit(0) }
             }
-            try new.write(to: URL(fileURLWithPath: settings), options: .atomic)
+            try writeSettings(new, to: settings)
             print("хуки вписаны")
         default:
             guard let old else { fail("нет файла \(settings)") }
             let new = try HookInstaller.remove(from: old)
-            try new.write(to: URL(fileURLWithPath: settings), options: .atomic)
+            try writeSettings(new, to: settings)
             print("хуки убраны")
         }
+    } catch HookInstaller.InstallError.unexpectedShape(let key) {
+        fail("в файле неожиданный вид раздела «\(key)»; ничего не изменено")
     } catch { fail("ошибка: \(error)") }
 
 default:
@@ -2355,11 +3196,11 @@ git commit -m "feat: hook bridge executable and developer console"
 
 ### Task 9: Проверка на настоящих сессиях Claude Code (Ghostty и VS Code)
 
-**Files:** изменений в коде нет; результаты записываются в спеку (шаг 9).
+**Files:** изменений в коде нет, если всё сходится; результаты записываются в спеку (шаг 10).
 
-Эту задачу выполняют вместе с владельцем: нужны живые интерактивные сессии. Хуки вписываются **только** в настройки временной папки `/tmp/topbar-e2e` (они действуют лишь в сессиях, запущенных из неё), глобальный `~/.claude/settings.json` не трогается. Единственное место вне проекта, куда пишется приложение, — его собственный каталог данных `~/Library/Application Support/topbar/` (сокет и копия моста): так и задумано спекой («стабильный путь моста»).
+Эту задачу выполняют вместе с владельцем: нужны живые интерактивные сессии. Хуки вписываются **только** в настройки временной папки (они действуют лишь в сессиях, запущенных из неё); глобальный `~/.claude/settings.json` не трогается. Вне проекта и вне временной папки пишутся только: каталог данных приложения `~/Library/Application Support/topbar/` (сокет и копия моста: так задумано спекой) и служебные записи самого Claude Code о запущенных там сессиях и доверии к папке (`~/.claude/projects/…`, `~/.claude.json`): их Claude Code создаёт для любой папки, они остаются после уборки и безвредны.
 
-- [ ] **Step 1: Собрать мост в релизном виде и установить в стабильное место**
+- [ ] **Step 1: Собрать мост и консоль, установить мост в стабильное место**
 
 Run:
 ```bash
@@ -2368,66 +3209,80 @@ swift build -c release --product topbar-hook && swift build --product topbar-dev
 ```
 Expected: `мост установлен: /Users/yer6o/Library/Application Support/topbar/bin/topbar-hook`.
 
-- [ ] **Step 2: Вписать хуки во временную папку**
+- [ ] **Step 2: Создать временную папку и вписать хуки только в неё**
 
 Run:
 ```bash
-mkdir -p /tmp/topbar-e2e/.claude && echo '{}' > /tmp/topbar-e2e/.claude/settings.json
-.build/debug/topbar-dev install --settings /tmp/topbar-e2e/.claude/settings.json
+E2E=$(mktemp -d /tmp/topbar-e2e.XXXXXX); echo "$E2E"
+mkdir -p "$E2E/.claude" && echo '{}' > "$E2E/.claude/settings.json"
+.build/debug/topbar-dev install --settings "$E2E/.claude/settings.json"
 ```
-Expected: показан список строк с `+` (в том числе `topbar-managed`), вопрос `Записать …? [y/N]`; ответить `y`. Затем `.build/debug/topbar-dev status --settings /tmp/topbar-e2e/.claude/settings.json` → `хуки установлены`.
+Expected: показаны строки со знаком `+` (в том числе `topbar-managed`), вопрос `Записать …? [y/N]` — ответить `y`. Затем `.build/debug/topbar-dev status --settings "$E2E/.claude/settings.json"` → `хуки установлены` и `мост на месте: …`. Запомнить путь `$E2E` (дальше он нужен в каждом окне).
 
 - [ ] **Step 3: Запустить консоль в окне Ghostty №1**
 
-Run: `.build/debug/topbar-dev run`
-Expected: `слушаю /Users/yer6o/Library/Application Support/topbar/hook.sock`.
+Run: `.build/debug/topbar-dev run --verbose`
+Expected: `слушаю /Users/yer6o/Library/Application Support/topbar/hook.sock`. С флагом `--verbose` каждая строка `· <событие> …` показывает, есть ли `tool_use_id`, номер процесса, терминал, `unattended` и признаки окна.
 
-- [ ] **Step 4: Открыть сессию в окне Ghostty №2 и пройти сценарии**
+- [ ] **Step 4: Открыть сессию в окне Ghostty №2**
 
-Run: `cd /tmp/topbar-e2e && claude --permission-mode default`
+Run: `cd "$E2E" && claude --permission-mode default`
+При первом запуске Claude Code спросит про доверие к папке — принять, затем **завершить сессию (`/exit`) и запустить заново той же командой**: хуки папки подхватываются полноценно только после принятия доверия.
 
-Для каждого пункта записать «как ожидалось / иначе (что именно)»:
+- [ ] **Step 5: Пройти сценарии и записать для каждого «как ожидалось / иначе (что именно)»**
 
-| № | Действие в сессии (окно №2) | Ожидаемое в консоли (окно №1) |
+| № | Действие | Ожидаемое |
 | :- | :- | :- |
-| a | Просто открыть сессию | Строка `простаивает  topbar-e2e  [Ghostty]` (проект — по `CLAUDE_PROJECT_DIR`) |
-| b | Написать `выполни команду mkdir probe-a`, **не отвечая в окне №2** — в окне №1 нажать `y` | Строка `работает`, затем `? [topbar-e2e] Bash: mkdir probe-a`; после `y` диалог в окне №2 закрывается сам, команда выполняется, потом `✓ готово` со звонком |
-| c | `mkdir probe-b`, ответить **в окне №2** | `(запрос закрыт: …)`, статус возвращается в `работает` и затем в `готово` |
-| d | `mkdir probe-c`, в окне №1 нажать `n` | Claude сообщает об отказе с текстом `Отклонено в topbar` |
-| e | Попросить `sleep 60`, прервать клавишей Esc | Через несколько секунд статус `простаивает` с пометкой `Прервано`, не `работает` |
-| f | В **третьем** окне: `cd /tmp/topbar-e2e && claude -p "выполни mkdir probe-d" --permission-mode default` | Карточки (`?`) **нет**; мост не мешает |
-| g | Закрыть окно №2 крестиком при открытой сессии | Строка исчезает не позже чем через ~10 с (записать: исчезла сразу по `SessionEnd` или по проверке живости) |
-| h | В новой сессии выполнить `/clear` | Записать: осталась одна строка или стало две (меняется ли `session_id`) |
+| a | Открыть сессию | В консоли строка `простаивает  <папка>  [Ghostty]`; в `--verbose` у `SessionStart` записать `tty=`, `term=` и ключи `hints=` (понадобятся для поиска окна в части 2) |
+| b | Написать `выполни команду mkdir probe-a`, в консоли нажать `y` | `работает`, затем `? […] Bash:` с полным текстом команды; после `y` диалог в окне №2 закрывается сам, команда выполняется, `✓ готово` со звонком. **Записать: есть ли `tool_use_id=…` у `PreToolUse` и `PostToolUse` (не «нет»)** |
+| c | `выполни команду mkdir probe-b`, ответить **в окне №2** | В консоли `(запрос закрыт: …)` в течение 1–2 с, статус возвращается в `работает`, потом `готово` |
+| d | `выполни команду mkdir probe-c`, в консоли нажать `n` | Claude сообщает об отказе с текстом «Отклонено в topbar» |
+| e | Разрешение **в терминале** на долгой команде: `выполни команду sleep 20 && echo ok`, ответить «да» в окне №2 | Записать, когда закрылся запрос в консоли: сразу или только по окончании команды (~20 с). Это известное ограничение, оно должно совпасть с описанным в спеке |
+| f | Отказ **в терминале**: `выполни команду mkdir probe-e`, ответить «нет» в окне №2, затем попросить любую другую команду | Записать, через сколько секунд запрос закрылся (ожидание: со следующим инструментом сессии, не раньше чем через 3 с) |
+| g | Esc **во время команды**: `выполни команду sleep 120` (разрешить в терминале), через 5 с нажать Esc | Записать, какие события пришли (`--verbose`) и через сколько секунд статус стал `простаивает` (ожидание: 20–30 с) |
+| h | Esc **пока Claude думает** (без инструмента): попросить длинное рассуждение и нажать Esc | Статус остаётся `работает` (известное ограничение до 10 минут) — подтвердить и записать, какие события пришли |
+| i | В окне №3: `cd "$E2E" && claude -p "выполни mkdir probe-d" --permission-mode default` | В консоли **нет ни строки, ни карточки** по этой сессии; записать, чем закончился `claude -p` |
+| j | Закрыть окно №2 крестиком при открытой сессии | Строка исчезает не позже ~10 с; записать, по `SessionEnd` (видно в `--verbose`) или по проверке живости |
+| k | В новой сессии выполнить `/clear` | Остаётся одна строка (не две); записать, меняется ли идентификатор сессии |
+| l | Запустить вторую сессию и убить её процесс (`kill -9 <pid из --verbose>`) | Строка исчезает не позже ~10 с |
+| m | Две сессии в одной папке и ветке | Подписи различаются суффиксом `#2`; в сводке обе |
+| n | Во время открытого запроса остановить консоль (Ctrl+C) | Диалог в терминале остаётся рабочим, сессия не зависла; после перезапуска консоли ответить в терминале — ошибок нет |
+| o | Субагент: `запусти субагента, пусть он выполнит mkdir probe-f` | Записать: есть ли в карточке пометка «субагент …» (поля `agent_id` / `agent_type`) |
 
-- [ ] **Step 5: Проверить признаки «без терминала» на интерактивной сессии**
+Любое расхождение, меняющее поведение, — сначала тест, воспроизводящий его, затем исправление кода (и обновление спеки), потом повтор пункта.
 
-Пункт b уже это проверяет: если в интерактивной сессии карточка (`?`) появилась, значит `CLAUDE_CODE_SESSION_ATTENDED` / `CLAUDE_CODE_ENTRYPOINT` не принимают интерактивную сессию за «без терминала». Если карточки нет — переписать условие `unattended` в `Sources/TopbarCore/BridgeRunner.swift` по реальным значениям (временно залогировать окружение хука, как делал пробный скрипт опыта) и повторить пункт b.
+- [ ] **Step 6: Проверить признаки «без терминала» на интерактивной сессии**
 
-- [ ] **Step 6: Повторить пункты a–c в терминале VS Code**
+Пункт b уже это проверяет: если в интерактивной сессии карточка (`?`) появилась, значит `CLAUDE_CODE_SESSION_ATTENDED` / `CLAUDE_CODE_ENTRYPOINT` не принимают её за «без терминала». Если карточки нет, переписать условие `unattended` в `Sources/TopbarCore/BridgeRunner.swift` по реальным значениям (временно залогировать окружение хука) и повторить пункт b.
 
-Открыть `/tmp/topbar-e2e` в VS Code, запустить `claude --permission-mode default` во встроенном терминале и пройти a, b, c.
-Expected: то же, но в скобках `[VS Code]`. Записать, какое значение пришло в `TERM_PROGRAM` и отличается ли что-то в поведении.
+- [ ] **Step 7: Повторить пункты a–c в терминале VS Code и в расширении Claude Code**
 
-- [ ] **Step 7: Проверить скорость моста**
+Открыть `$E2E` в VS Code, запустить `claude --permission-mode default` во встроенном терминале и пройти a, b, c. Затем, если расширение Claude Code для VS Code используется, пройти b в нём.
+Expected: то же, но `[VS Code]`. Записать `term=` и ключи `hints=` и всё, что отличается; события из расширения могут не прийти — это тоже результат.
 
-Run (при остановленной консоли, то есть без слушателя): `cd /tmp/topbar-e2e && time (echo '{"hook_event_name":"Stop","session_id":"x"}' | "$HOME/Library/Application Support/topbar/bin/topbar-hook")`
-Expected: завершается за доли секунды, без вывода и без ошибок (приложение не запущено — мост молча выходит).
+- [ ] **Step 8: Проверить скорость моста при выключенной консоли**
 
-- [ ] **Step 8: Убрать за собой**
+Остановить консоль (Ctrl+C), затем:
+
+Run: `time (echo '{"hook_event_name":"Stop","session_id":"x"}' | "$HOME/Library/Application Support/topbar/bin/topbar-hook")`
+Expected: завершается за доли секунды, без вывода и без ошибок (слушателя нет — мост молча выходит).
+
+- [ ] **Step 9: Убрать за собой**
 
 Run:
 ```bash
-.build/debug/topbar-dev uninstall --settings /tmp/topbar-e2e/.claude/settings.json
-rm -rf /tmp/topbar-e2e
+.build/debug/topbar-dev uninstall --settings "$E2E/.claude/settings.json"
+rm -rf "$E2E"
 ```
-Expected: `хуки убраны`. (Каталог `~/Library/Application Support/topbar/` оставить: он понадобится приложению.)
+Expected: `хуки убраны`. Каталог `~/Library/Application Support/topbar/` оставить: он понадобится приложению.
 
-- [ ] **Step 9: Записать результаты в спеку и закоммитить**
+- [ ] **Step 10: Записать результаты в спеку и закоммитить всё**
 
-Modify: `docs/specs/2026-11-03-topbar-mvp.md` — в разделе «Результаты опыта с хуками» добавить пункты по a–h и VS Code (что подтвердилось, что оказалось иначе), в «Открытых вопросах» закрыть вопросы 2–4 и дописать новые, если нашлись. Если что-то из таблицы шага 4 оказалось иначе, чем ожидалось, — сначала исправить код (с новым тестом, который воспроизводит расхождение), потом повторить пункт.
+Modify: `docs/specs/2026-11-03-topbar-mvp.md` — в разделе «Результаты опыта с хуками» добавить пункты по a–o и VS Code (что подтвердилось, что оказалось иначе), в «Открытых вопросах» закрыть 1-й частично (собраны `tty` и `hints`), 2–9-й полностью и дописать новые, если нашлись; в «Известных ограничениях» поправить цифры по фактическим замерам e–h.
 
 ```bash
-git add docs/specs/2026-11-03-topbar-mvp.md
+swift test 2>&1 | grep -E "error:|failed|Executed"   # убедиться, что тесты по-прежнему зелёные
+git add docs/specs Sources Tests
 git commit -m "docs: record end-to-end results of hook bridge on real sessions"
 ```
 
@@ -2450,15 +3305,15 @@ Append to `README.md`:
 
 - `swift test` — все тесты ядра и моста;
 - `swift build` — собрать мост `topbar-hook` и консоль `topbar-dev`;
-- `.build/debug/topbar-dev run` — слушать хуки и показывать сессии в терминале.
+- `.build/debug/topbar-dev run --verbose` — слушать хуки и показывать сессии в терминале.
 
 Установка хуков в настройки Claude Code — `topbar-dev install --settings <файл>` (показывает разницу и спрашивает подтверждение); убрать — `topbar-dev uninstall`.
 ```
 
 - [ ] **Step 2: Полный прогон**
 
-Run: `swift test 2>&1 | grep -E "Executed|error" | tail -3`
-Expected: `Executed 50 tests, with 0 failures`.
+Run: `swift test 2>&1 | grep -E "error:|failed|Executed" | tail -2`
+Expected: актуальное число тестов (87 или больше, если в задаче 9 добавлялись), `0 failures`.
 
 - [ ] **Step 3: Commit**
 
@@ -2469,7 +3324,7 @@ git commit -m "docs: add development notes to README"
 
 - [ ] **Step 4: Отчёт владельцу и предложение интеграции**
 
-Не мержить и не пушить самостоятельно: описать, что готово, чем проверено (тесты + таблица шага 4 задачи 9), и предложить, как влить ветку `feat/core-bridge` (решает владелец).
+Не мержить и не пушить самостоятельно: описать, что готово, чем проверено (тесты + таблица шага 5 задачи 9) и какие ограничения подтвердились, и предложить, как влить ветку `feat/core-bridge` (решает владелец).
 
 ---
 
@@ -2477,19 +3332,21 @@ git commit -m "docs: add development notes to README"
 
 | Требование спеки | Где реализовано |
 | :- | :- |
-| Мост: быстрый выход, нет сокета — тихо (раздел «Мост: правила») | Task 5 (`testNoServerMeansSilentNilQuickly`), Task 9 шаг 7 |
-| Подтверждение «принято» ≤200 мс, отдельно от ожидания решения | Task 5 (`ackTimeout`), `BridgeRunner` |
-| Решение `allow`/`deny` закрывает диалог; хук не прерывается при ответе в терминале; карточку снимает ядро по `PostToolUse` | Task 5, Task 7 (`testPostToolUseClosesCardAndReleasesBridge`), Task 9 b–c |
-| «Без решения», если карточку не показываем | Task 7 (`cardPolicy`, `testCardPolicyFalse…`) |
-| Исключения: `AskUserQuestion`, `ExitPlanMode`, сессии без терминала | Task 2 (`PermissionPolicy`), Task 7, Task 9 f |
-| Идентификатор запроса генерирует мост; pid из `CLAUDE_PID`/предка; корень проекта из `CLAUDE_PROJECT_DIR` | Task 5 (`BridgeRunner`), Task 4 |
-| Сокет: каталог 0700, права 0600, проверка владельца пира | Task 5 (`testSocketPermissionsAreOwnerOnly`, `getpeereid`) |
-| Установка/удаление хуков с меткой, показ разницы, без копий файла | Task 6, Task 8 (`topbar-dev install`), Task 9 шаги 2 и 8 |
-| Автомат: все переходы, очередь, прерывание, `StopFailure`, тишина 10 мин без выполняющегося инструмента, upsert по `session_id`, `compact` | Task 2 |
+| Мост: быстрый выход, один общий срок 0,3 с, нет сокета — тихо, зависший получатель не держит | Task 5 (`testNoServer…`, `testHungReceiverDoesNotBlockBridgePastDeadline`), Task 9 шаг 8 |
+| Полный ввод только с запросом, остальным облегчённый | Task 1 (`slimmed`), Task 5 (`testPlainEventsCarrySlimToolInput…`) |
+| Решение `allow`/`deny` закрывает диалог; хук не прерывается при ответе в терминале; карточку снимает ядро по событию | Task 5, Task 7, Task 9 b–c |
+| Канал держится, `autoOpenPolicy` управляет только раскрытием | Task 7 (`testAutoOpenPolicyFalseKeepsChannel…`) |
+| Мёртвый канал, дубль идентификатора, `releaseAllCards`, «не доставлено» | Task 7 |
+| Вопросы без кнопок; сессии без терминала игнорируются целиком | Task 2 (`PermissionPolicy`, `cardable`), Task 7, Task 9 i |
+| Номер процесса: `CLAUDE_PID` → предок `claude`/`claude.exe` → 0 | Task 4, Task 5 (`testUnknownSessionProcessGivesPidZero…`) |
+| Сокет: права каталога 0700 при каждом запуске, права файла 0600, проверка владельца пира, не перехватывать живого слушателя, не удалять чужой файл | Task 5 |
+| Установка/удаление хуков, метка, точная разница, предупреждение о переформатировании, отказ при неожиданном виде, статус моста, симлинк и права | Task 6, Task 8 (`topbar-dev`), Task 9 шаги 2 и 9 |
+| Автомат: переходы, очередь, привязка по `tool_use_id`, список вызовов, тишина, Esc-правило для Bash, upsert, дедупликация по процессу, запоздавший `SessionEnd` | Task 2 |
 | Подпись «проект · ветка», суффикс `#2`, worktree/detached HEAD | Task 2 (`displayTitles`), Task 3 |
 | Сводка и приоритет статусов | Task 2 (`Summary`, `urgency`) |
-| Проверка живости раз в 10 с по паре pid+время старта | Task 4, Task 7 (`testDeadProcessIsRemovedByLivenessTick`) |
-| Открытые вопросы 2–4 (VS Code, закрытие окна, `/clear`) | Task 9 шаги 4 g–h и 6 |
-| Оверлей, карточка, меню в строке меню, звук, переход к сессии, «владелец смотрит», запуск при входе, сон/монитор, обрезка длинного ввода на карточке, режим разрешений значком | **Часть 2** (отдельный план после задачи 9) |
+| Проверка живости раз в 10 с по паре pid+время старта | Task 4, Task 7 |
+| Известные ограничения (Esc, отказ/разрешение в терминале на долгой команде) подтверждаются измерением | Task 9 e–h |
+| Открытые вопросы 2–9 | Task 9 шаги 5–7 |
+| Окно острова, карточка, меню, звук, переход к сессии, «владелец смотрит», запуск при входе, сон/монитор (через `releaseAllCards`), обрезка длинного ввода в интерфейсе, режим разрешений значком | **Часть 2** (отдельный план после задачи 9) |
 
-Пробелы внутри части 1: нет. Типы и имена сверены между задачами (`BridgeMessage`, `CoreReply`, `SessionStore.apply/resolve/markViewed/sweepQuiet/remove`, `SessionHub.decide/markViewed/snapshot/tickNow`, `HookInstaller.install/remove/isInstalled/diff`); весь код в плане скомпилирован и прогнан (50 тестов, 0 сбоев) на Xcode 27.2 / Swift 6.4.2 перед записью.
+Пробелов внутри части 1 нет. Типы и имена сверены между задачами (`BridgeMessage`, `CoreReply`, `RunningTool`, `PermissionRequest.detail/toolUseId/cardable`, `SessionStore.apply/resolve/markViewed/sweepQuiet/remove`, `SessionHub.decide/releaseAllCards/markViewed/snapshot/tickNow/flush`, `HookInstaller.install/remove/isInstalled/bridgePaths/diff/willReformat`). Весь код в плане скомпилирован и прогнан (87 тестов, 0 сбоев, три прогона подряд) на Xcode 27.2 / Swift 6.4.2 перед записью.
