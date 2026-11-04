@@ -3056,6 +3056,7 @@ guard let command = args.first else { usage() }
 
 switch command {
 case "run":
+    setvbuf(stdout, nil, _IOLBF, 0)   // построчный вывод, даже когда stdout — файл или pipe
     let verbose = args.contains("--verbose")
     let hub = SessionHub(socketPath: Paths.socketPath)
     var open: [PermissionRequest] = []   // трогаем только на hub.callbackQueue
@@ -3350,3 +3351,26 @@ git commit -m "docs: add development notes to README"
 | Окно острова, карточка, меню, звук, переход к сессии, «владелец смотрит», запуск при входе, сон/монитор (через `releaseAllCards`), обрезка длинного ввода в интерфейсе, режим разрешений значком | **Часть 2** (отдельный план после задачи 9) |
 
 Пробелов внутри части 1 нет. Типы и имена сверены между задачами (`BridgeMessage`, `CoreReply`, `RunningTool`, `PermissionRequest.detail/toolUseId/cardable`, `SessionStore.apply/resolve/markViewed/sweepQuiet/remove`, `SessionHub.decide/releaseAllCards/markViewed/snapshot/tickNow/flush`, `HookInstaller.install/remove/isInstalled/bridgePaths/diff/willReformat`). Весь код в плане скомпилирован и прогнан (87 тестов, 0 сбоев, три прогона подряд) на Xcode 27.2 / Swift 6.4.2 перед записью.
+
+---
+
+## Результаты выполнения (2026-11-04)
+
+Задачи 0–8 выполнены в ветке `feat/core-bridge`, 87 тестов, 0 сбоев (три прогона подряд).
+
+**Задача 9 выполнена автоматически, без участия владельца**: консоль слушала настоящий сокет, а сессии Claude Code
+запускались самой проверкой — `claude -p` (без терминала) и интерактивная сессия, которой управляла
+псевдотерминальная обвязка (подтверждение доверия к папке, ввод фразы, ответ на диалог в терминале).
+
+Подтверждено на настоящем Claude Code 2.1.317:
+- мост → сокет → ядро работает целиком; хуки из настроек папки срабатывают и в `claude -p`;
+- интерактивная сессия: `unattended=false`, терминал `ttys002`, `TERM_PROGRAM=ghostty`, карточка (`?`) появилась;
+  статусы прошли «ждёт → работает → готово», `SessionEnd` убрал строку;
+- ответ в терминале закрыл запрос по `PostToolUse` (привязка по отпечатку ввода сработала);
+- `claude -p`: `unattended=true`, сессия не показывается;
+- `tool_use_id` приходит в `PreToolUse` и `PostToolUse`, в `PermissionRequest` его нет (как в документации);
+- `CLAUDE_PID` даёт верный процесс; признаки окна — переменные `GHOSTTY_SURFACE_ID`, `GHOSTTY_RESOURCES_DIR` и др.;
+- исправлена одна ошибка консоли: вывод в файл буферизовался, добавлен построчный режим (`setvbuf`).
+
+Не проверено вручную и остаётся на практическое использование (корректное поведение закрыто юнит-тестами):
+VS Code и расширение, закрытие окна крестиком и `kill -9`, `/clear`, субагент, события при Esc.

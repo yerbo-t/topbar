@@ -44,6 +44,7 @@ guard let command = args.first else { usage() }
 
 switch command {
 case "run":
+    setvbuf(stdout, nil, _IOLBF, 0)   // построчный вывод, даже когда stdout — файл или pipe
     let verbose = args.contains("--verbose")
     let hub = SessionHub(socketPath: Paths.socketPath)
     var open: [PermissionRequest] = []   // трогаем только на hub.callbackQueue
