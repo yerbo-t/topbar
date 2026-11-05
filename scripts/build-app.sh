@@ -3,7 +3,7 @@
 # Использование: scripts/build-app.sh [--install]    (--install копирует в ~/Applications)
 # Переменные окружения:
 #   TOPBAR_VERSION       версия (по умолчанию — из файла VERSION)
-#   TOPBAR_BUILD         номер сборки (по умолчанию — число коммитов)
+#   TOPBAR_BUILD         номер сборки (по умолчанию — время сборки ГГГГММДДччмм: только растёт, как бы ни сливали ветки)
 #   TOPBAR_FEED_URL      адрес ленты обновлений (appcast.xml); без него обновления в сборке выключены
 #   TOPBAR_PING_URL      адрес, куда (с согласия человека) уходит запись «пользуюсь topbar»; без него ничего не спрашивается и не шлётся
 #   TOPBAR_ALLOW_HTTP=1  разрешить http для ленты (только для локальной проверки обновлений)
@@ -13,7 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION="${TOPBAR_VERSION:-$(tr -d '[:space:]' < VERSION)}"
-BUILD="${TOPBAR_BUILD:-$(git rev-list --count HEAD)}"
+BUILD="${TOPBAR_BUILD:-$(date +%Y%m%d%H%M)}"
 FEED_URL="${TOPBAR_FEED_URL:-}"
 SIGN_DIR="$HOME/Library/Application Support/topbar-signing"
 KEYCHAIN="$SIGN_DIR/topbar-signing.keychain-db"

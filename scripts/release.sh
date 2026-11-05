@@ -6,7 +6,7 @@
 #   TOPBAR_FEED_URL       куда будет выложен appcast.xml (адрес вшивается в приложение)          — обязательно
 #   TOPBAR_DOWNLOAD_BASE  каталог, откуда скачиваются zip и dmg (без завершающего «/»)         — обязательно
 #   TOPBAR_PING_URL       адрес службы со списком установок (необязательно)
-#   TOPBAR_VERSION, TOPBAR_BUILD — версия и номер сборки (по умолчанию VERSION и число коммитов)
+#   TOPBAR_VERSION, TOPBAR_BUILD — версия и номер сборки (по умолчанию VERSION и время сборки)
 #   TOPBAR_ALLOW_HTTP=1   разрешить http (только проверка обновлений на своём Mac)
 # Использование: scripts/release.sh [файл-с-описанием.html]
 set -euo pipefail
@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 : "${TOPBAR_FEED_URL:?задайте TOPBAR_FEED_URL — адрес appcast.xml}"
 : "${TOPBAR_DOWNLOAD_BASE:?задайте TOPBAR_DOWNLOAD_BASE — откуда скачиваются файлы}"
 VERSION="${TOPBAR_VERSION:-$(tr -d '[:space:]' < VERSION)}"
-BUILD="${TOPBAR_BUILD:-$(git rev-list --count HEAD)}"
+BUILD="${TOPBAR_BUILD:-$(date +%Y%m%d%H%M)}"
 export TOPBAR_VERSION="$VERSION" TOPBAR_BUILD="$BUILD"
 SIGN_DIR="$HOME/Library/Application Support/topbar-signing"
 KEY="$SIGN_DIR/sparkle-ed25519.key"
