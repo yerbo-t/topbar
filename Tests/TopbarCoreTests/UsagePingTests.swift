@@ -23,9 +23,19 @@ final class UsagePingTests: XCTestCase {
     }
 
     func testPayloadContainsOnlyTheDeclaredFields() throws {
-        let ping = UsagePing(id: "A", name: "Анна", version: "0.2.0", build: "32", macos: "26.6.2", event: "install")
+        let ping = UsagePing(id: "A", name: "Анна", version: "0.2.0", build: "32", macos: "26.6.2", event: "install",
+                             model: "Mac15,6", chip: "Apple M3 Pro", ramGB: 18, language: "ru-KZ")
         let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(ping)) as? [String: Any]
-        XCTAssertEqual(Set(object?.keys.map { $0 } ?? []), ["id", "name", "version", "build", "macos", "event"])
+        XCTAssertEqual(Set(object?.keys.map { $0 } ?? []),
+                       ["id", "name", "version", "build", "macos", "event", "model", "chip", "ramGB", "language"])
         XCTAssertTrue(ping.jsonString().contains("\"name\" : \"Анна\""))
+    }
+
+    func testFeedbackTextIsTrimmedCappedAndEmptyMeansNothingToSend() {
+        XCTAssertNil(Feedback.cleanMessage("  \n "))
+        XCTAssertEqual(Feedback.cleanMessage("  Всё супер  "), "Всё супер")
+        XCTAssertEqual(Feedback.cleanMessage(String(repeating: "а", count: 9000))?.count, Feedback.maxLength)
+        XCTAssertNil(Feedback.cleanContact(""))
+        XCTAssertEqual(Feedback.cleanContact(" @anna "), "@anna")
     }
 }

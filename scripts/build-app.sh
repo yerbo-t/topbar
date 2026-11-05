@@ -5,7 +5,7 @@
 #   TOPBAR_VERSION       версия (по умолчанию — из файла VERSION)
 #   TOPBAR_BUILD         номер сборки (по умолчанию — время сборки ГГГГММДДччмм: только растёт, как бы ни сливали ветки)
 #   TOPBAR_FEED_URL      адрес ленты обновлений (appcast.xml); без него обновления в сборке выключены
-#   TOPBAR_PING_URL      адрес, куда (с согласия человека) уходит запись «пользуюсь topbar»; без него ничего не спрашивается и не шлётся
+#   TOPBAR_SERVER_URL    адрес службы (https://…, без слэша на конце): запись «пользуюсь» (с согласия человека) и отзывы; без него ничего не спрашивается и не шлётся
 #   TOPBAR_ALLOW_HTTP=1  разрешить http для ленты (только для локальной проверки обновлений)
 # Подпись: сертификат «topbar release» из scripts/setup-signing.sh, если он доверенный; иначе ad-hoc (разрешения слетают при
 # каждой сборке — для разработки терпимо, для выпуска нет).
@@ -38,9 +38,9 @@ if [[ -n "$FEED_URL" ]]; then
     KEYS="$KEYS
     <key>SUFeedURL</key><string>$FEED_URL</string>"
 fi
-if [[ -n "${TOPBAR_PING_URL:-}" ]]; then
+if [[ -n "${TOPBAR_SERVER_URL:-}" ]]; then
     KEYS="$KEYS
-    <key>TopbarPingURL</key><string>${TOPBAR_PING_URL}</string>"
+    <key>TopbarServerURL</key><string>${TOPBAR_SERVER_URL}</string>"
 fi
 if [[ "${TOPBAR_ALLOW_HTTP:-}" == "1" ]]; then
     KEYS="$KEYS

@@ -84,6 +84,7 @@ final class MenuBarListController {
             height += MenuBarListView.listHeight(rows: model.entries.count)
         }
         if model.message != nil { height += 44 }
+        if model.updateVersion != nil { height += 52 }       // кнопка «Обновить до …»
         if model.hidingTitle != nil { height += 52 }       // крупная кнопка «Спрятать / Показать значки»
         let x = min(max(anchor.midX - width / 2, frame.minX + 8), frame.maxX - width - 8)
         let y = anchor.minY - height - 6

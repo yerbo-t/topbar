@@ -1,17 +1,22 @@
 import AppKit
 import Sparkle
+import UserNotifications
 
-/// Автообновление (Sparkle): раз в несколько часов приложение смотрит ленту обновлений, сама скачивает и проверяет подпись
-/// (EdDSA) и ставит обновление, когда это никому не мешает: нет открытых запросов разрешений. Без адреса ленты в Info.plist
-/// (сборка для разработки) обновления выключены.
+/// Обновления (Sparkle) без принуждения. Раз в несколько часов приложение смотрит ленту; найдя новую версию, ничего не скачивает
+/// и не ставит: показывает уведомление, строку «Обновить до …» в меню и крупную кнопку в списке значков. Кнопка открывает окно
+/// Sparkle с описанием версии: «Установить» скачивает, проверяет подпись (EdDSA) и перезапускает приложение. Версия в ленте всегда
+/// одна, последняя. Без адреса ленты в Info.plist (сборка для разработки) обновлений нет.
 @MainActor
-final class AppUpdater: NSObject, SPUUpdaterDelegate {
+final class AppUpdater: NSObject, SPUUpdaterDelegate, @preconcurrency SPUStandardUserDriverDelegate, UNUserNotificationCenterDelegate {
     private var controller: SPUStandardUpdaterController?
-    private var pendingInstall: (() -> Void)?
-    private var idleTimer: Timer?
+    private let defaults = UserDefaults.standard
+    private static let notifiedKey = "updateNotifiedVersion"
 
-    /// Можно ли сейчас перезапустить приложение для обновления (ставит AppDelegate).
-    var canRestartNow: () -> Bool = { true }
+    /// Версия, о которой знаем, но не поставили; nil — новой нет.
+    private(set) var availableVersion: String? {
+        didSet { if oldValue != availableVersion { onAvailabilityChange?(availableVersion) } }
+    }
+    var onAvailabilityChange: ((String?) -> Void)?
 
     var isConfigured: Bool { Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") is String }
 
@@ -23,40 +28,63 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate {
 
     func start() {
         guard isConfigured, controller == nil else { return }
-        controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
+        controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: self)
     }
 
-    /// Проверка по просьбе владельца (с окном Sparkle: «есть новая версия» или «у вас последняя»).
-    func checkForUpdates() { controller?.checkForUpdates(nil) }
-
-    // MARK: SPUUpdaterDelegate
-
-    /// Обновление скачано и проверено, Sparkle поставил бы его при выходе. Мы ставим сами, когда можно перезапуститься.
-    nonisolated func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem,
-                             immediateInstallationBlock immediateInstallHandler: @escaping () -> Void) -> Bool {
-        DispatchQueue.main.async { MainActor.assumeIsolated { self.install(when: immediateInstallHandler) } }
-        return true
+    /// Открыть окно Sparkle: если новая версия есть — описание и «Установить»; если нет — «У вас последняя версия».
+    func checkForUpdates() {
+        NSApp.activate(ignoringOtherApps: true)
+        controller?.checkForUpdates(nil)
     }
 
-    // MARK: внутреннее
+    // MARK: SPUStandardUserDriverDelegate — мягкие напоминания
 
-    private func install(when block: @escaping () -> Void) {
-        pendingInstall = block
-        tryInstall()
-        guard pendingInstall != nil, idleTimer == nil else { return }
-        let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tryInstall() }
+    var supportsGentleScheduledUpdateReminders: Bool { true }
+
+    /// Плановую проверку окном не показываем: даём знать сами, не отнимая фокус у работы.
+    func standardUserDriverShouldHandleShowingScheduledUpdate(_ update: SUAppcastItem, andInImmediateFocus immediateFocus: Bool) -> Bool { false }
+
+    func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
+        guard !handleShowingUpdate else { return }
+        availableVersion = update.displayVersionString
+        notifyOnce(version: update.displayVersionString)
+    }
+
+    func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) { removeDeliveredNotification() }
+
+    func standardUserDriverWillFinishUpdateSession() {
+        availableVersion = nil
+        removeDeliveredNotification()
+    }
+
+    // MARK: уведомление
+
+    private func notifyOnce(version: String) {
+        guard defaults.string(forKey: Self.notifiedKey) != version else { return }
+        defaults.set(version, forKey: Self.notifiedKey)
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "Вышла новая версия topbar"
+            content.body = "Версия \(version). Нажмите, чтобы посмотреть, что нового, и обновить."
+            center.add(UNNotificationRequest(identifier: "topbar-update", content: content, trigger: nil))
         }
-        timer.tolerance = 10
-        RunLoop.main.add(timer, forMode: .common)
-        idleTimer = timer
     }
 
-    private func tryInstall() {
-        guard let block = pendingInstall, canRestartNow() else { return }
-        pendingInstall = nil
-        idleTimer?.invalidate()
-        idleTimer = nil
-        block()
+    private func removeDeliveredNotification() {
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["topbar-update"])
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                            withCompletionHandler completionHandler: @escaping () -> Void) {
+        DispatchQueue.main.async { MainActor.assumeIsolated { self.checkForUpdates() } }
+        completionHandler()
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
     }
 }

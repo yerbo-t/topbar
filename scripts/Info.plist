@@ -15,9 +15,10 @@
     <key>NSHighResolutionCapable</key><true/>
     <key>NSAppleEventsUsageDescription</key><string>topbar узнаёт, какой терминал Ghostty в фокусе, и переносит вас к нужной сессии.</string>
     <key>NSHumanReadableCopyright</key><string>topbar</string>
-    <!-- Автообновление (Sparkle). Подпись обновлений — EdDSA; ключ и адрес ленты подставляет scripts/build-app.sh. -->
+    <!-- Обновления (Sparkle): раз в 6 часов проверка и уведомление, без автоустановки. Подпись — EdDSA; ключ и адрес ленты подставляет scripts/build-app.sh. -->
     <key>SUEnableAutomaticChecks</key><true/>
-    <key>SUAutomaticallyUpdate</key><true/>
+    <key>SUAutomaticallyUpdate</key><false/>
+    <key>SUAllowsAutomaticUpdates</key><false/>
     <key>SUScheduledCheckInterval</key><integer>21600</integer>
     <key>SUEnableSystemProfiling</key><false/>
 @SPARKLE_KEYS@

@@ -15,6 +15,9 @@ final class MenuBarListModel: ObservableObject {
     var hider: MenuBarHider?
     var onNeedsSetup: (() -> Void)?
     var onClose: (() -> Void)?
+    /// Есть новая версия приложения (nil — нет) и что сделать по кнопке «Обновить».
+    @Published var updateVersion: String?
+    var onUpdate: (() -> Void)?
 
     private static let pinnedKey = "menuBarPinned"
 

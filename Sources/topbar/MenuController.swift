@@ -14,7 +14,15 @@ final class MenuController: NSObject, NSMenuDelegate {
     /// Владелец включил или выключил плеер в меню.
     var onPlayerToggle: ((Bool) -> Void)?
     /// Обновления (nil — не настроены в этой сборке).
-    var updater: AppUpdater?
+    var updater: AppUpdater? {
+        didSet {
+            list.model.onUpdate = { [weak self] in self?.updater?.checkForUpdates() }
+            updater?.onAvailabilityChange = { [weak self] version in
+                self?.list.model.updateVersion = version
+                self?.statusItem.button?.toolTip = version.map { "Доступна версия \($0) (откройте список значков)" }
+            }
+        }
+    }
     /// Сообщение автору об использовании (nil или недоступно — в этой сборке не используется).
     var telemetry: Telemetry?
 
@@ -106,6 +114,10 @@ final class MenuController: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         GhosttyAccess.shared.refresh(ask: false)
         menu.removeAllItems()
+        if let version = updater?.availableVersion {
+            menu.addItem(item("Обновить до \(version)…", #selector(checkForUpdates)))
+            menu.addItem(.separator())
+        }
         let status = NSMenuItem(title: "Хуки Claude Code: \(hooks.statusText())", action: nil, keyEquivalent: "")
         status.isEnabled = false
         menu.addItem(status)
@@ -140,6 +152,7 @@ final class MenuController: NSObject, NSMenuDelegate {
                 menu.addItem(item("Изменить имя…", #selector(changeName)))
                 menu.addItem(item("Что отправляется…", #selector(showWhatIsSent)))
             }
+            menu.addItem(item("Написать отзыв…", #selector(sendFeedback)))
             menu.addItem(.separator())
         }
         if let updater {
@@ -166,6 +179,7 @@ final class MenuController: NSObject, NSMenuDelegate {
     @objc func toggleShare() { guard let t = telemetry else { return }; t.setEnabled(!t.isEnabled) }
     @objc func changeName() { telemetry?.askName() }
     @objc func showWhatIsSent() { telemetry?.showWhatIsSent() }
+    @objc func sendFeedback() { telemetry?.askFeedback() }
 
     @objc func toggleHiding() {
         Settings.hidesMenuBarIcons.toggle()

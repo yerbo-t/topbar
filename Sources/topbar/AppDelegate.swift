@@ -24,7 +24,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.onPlayerToggle = { [weak self] on in self?.model.setPlayerEnabled(on) }
         menu.updater = updater
         menu.telemetry = telemetry
-        updater.canRestartNow = { [weak self] in self?.model.canRestartNow ?? true }
 
         do { try hub.start() } catch SocketError.alreadyRunning {
             fatal("topbar уже запущен", "Сокет \(Paths.socketPath) слушает другой экземпляр.")

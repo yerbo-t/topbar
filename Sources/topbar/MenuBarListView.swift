@@ -11,6 +11,14 @@ struct MenuBarListView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            if let version = model.updateVersion {
+                Button { model.onUpdate?(); model.onClose?() } label: {
+                    Label("Обновить до \(version)", systemImage: "arrow.down.circle.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(CardButtonStyle(prominent: true))
+                .padding(.horizontal, 18).padding(.bottom, 10)
+                .accessibilityHint("Откроет описание новой версии и предложит установить её")
+            }
             if let title = model.hidingTitle {
                 Button { model.toggleHiding() } label: {
                     Label(title, systemImage: model.hidingSymbol).frame(maxWidth: .infinity)
