@@ -11,6 +11,8 @@ final class MenuController: NSObject, NSMenuDelegate {
     private let hooks = HooksController()
     private let hider = MenuBarHider()
     private let list = MenuBarListController()
+    /// Владелец включил или выключил плеер в меню.
+    var onPlayerToggle: ((Bool) -> Void)?
 
     override init() {
         if Settings.hidesMenuBarIcons { MenuBarHider.seedPositions() }
@@ -119,6 +121,9 @@ final class MenuController: NSObject, NSMenuDelegate {
         let login = item("Запускать при входе", #selector(toggleLogin))
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(login)
+        let player = item("Плеер на острове", #selector(togglePlayer))
+        player.state = Settings.playerEnabled ? .on : .off
+        menu.addItem(player)
         let sound = item("Звук", #selector(toggleSound))
         sound.state = Settings.soundEnabled ? .on : .off
         menu.addItem(sound)
@@ -135,6 +140,7 @@ final class MenuController: NSObject, NSMenuDelegate {
     @objc func installHooks() { hooks.install() }
     @objc func removeHooks() { hooks.remove() }
     @objc func toggleSound() { Settings.soundEnabled.toggle() }
+    @objc func togglePlayer() { onPlayerToggle?(!Settings.playerEnabled) }
     @objc func setupHint() { showSetupHint() }
 
     @objc func toggleHiding() {

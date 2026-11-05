@@ -3,6 +3,7 @@ import Foundation
 enum Settings {
     private static let soundKey = "soundEnabled"
     private static let hiderKey = "hidesMenuBarIcons"
+    private static let playerKey = "playerEnabled"
     private static let hiderHintKey = "menuBarHintShown"
 
     static var soundEnabled: Bool {
@@ -20,5 +21,11 @@ enum Settings {
     static var menuBarHintShown: Bool {
         get { UserDefaults.standard.bool(forKey: hiderHintKey) }
         set { UserDefaults.standard.set(newValue, forKey: hiderHintKey) }
+    }
+
+    /// Плеер («Сейчас играет») показывается на острове.
+    static var playerEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: playerKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: playerKey) }
     }
 }

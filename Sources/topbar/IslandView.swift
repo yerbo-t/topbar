@@ -104,16 +104,24 @@ struct CollapsedView: View {
     var body: some View {
         let ears = model.ears
         let notchW = model.geometry?.notchWidth ?? 200
+        let mediaOnly = model.presenter.mediaActive && model.presenter.summaryChips.isEmpty
         HStack(spacing: 0) {
-            ear(ears.left, style: ears.style, alignment: .trailing, width: ears.leftWidth)
-            Spacer().frame(width: notchW)
-            ear(ears.right, style: ears.style, alignment: .leading, width: ears.rightWidth)
+            if mediaOnly {
+                ArtworkView(image: model.artwork, size: 20, radius: 5).frame(width: ears.leftWidth)
+                Spacer().frame(width: notchW)
+                EqualizerView(playing: model.nowPlaying?.playing ?? false).frame(width: 14, height: 12)
+                    .frame(width: ears.rightWidth).clipped()
+            } else {
+                ear(ears.left, style: ears.style, alignment: .trailing, width: ears.leftWidth)
+                Spacer().frame(width: notchW)
+                ear(ears.right, style: ears.style, alignment: .leading, width: ears.rightWidth)
+            }
         }
         .frame(height: model.geometry?.notchHeight ?? 32)
         .contentShape(Rectangle())
         .onTapGesture { model.toggleList() }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(model.presenter.summaryText.isEmpty ? "Сессии Claude Code" : model.presenter.summaryText)
+        .accessibilityLabel(model.presenter.summaryText.isEmpty ? (model.nowPlaying?.title ?? "Сессии Claude Code") : model.presenter.summaryText)
         .accessibilityAddTraits(.isButton)
     }
 
@@ -143,12 +151,17 @@ struct ListView: View {
     var body: some View {
         VStack(spacing: 0) {
             Spacer().frame(height: (model.geometry?.notchHeight ?? 32) + 6)
+            if model.presenter.mediaActive {
+                PlayerView(model: model)
+            }
             ForEach(model.presenter.sessions, id: \.sessionId) { session in
                 Button { model.rowTapped(session) } label: { RowView(session: session, title: model.titles[session.sessionId] ?? session.project) }
                     .buttonStyle(RowButtonStyle())
             }
             HStack {
-                Text("\(model.presenter.sessions.count) \(plural(model.presenter.sessions.count))")
+                if !model.presenter.sessions.isEmpty {
+                    Text("\(model.presenter.sessions.count) \(plural(model.presenter.sessions.count))")
+                }
                 Spacer()
                 Button("Свернуть") { model.collapse() }.buttonStyle(.plain).foregroundStyle(.secondary)
             }

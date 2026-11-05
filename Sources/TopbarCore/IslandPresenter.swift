@@ -14,12 +14,14 @@ public struct IslandPresenter {
     /// Очередь карточек в порядке прихода (первая показывается).
     public private(set) var cardQueue: [String] = []
     public private(set) var listOpen = false
+    /// Сейчас что-то играет (или только что поставлено на паузу): остров показывается и без сессий.
+    public private(set) var mediaActive = false
 
     public init() {}
 
     public var mode: IslandMode {
         if let id = currentCardId { return .card(requestId: id) }
-        if sessions.isEmpty { return .hidden }
+        if sessions.isEmpty && !mediaActive { return .hidden }
         return listOpen ? .list : .collapsed
     }
 
@@ -43,7 +45,12 @@ public struct IslandPresenter {
         self.sessions = sessions
         let live = Set(sessions.flatMap { $0.queue.map(\.requestId) })
         cardQueue.removeAll { !live.contains($0) }
-        if sessions.isEmpty { listOpen = false }
+        if sessions.isEmpty && !mediaActive { listOpen = false }
+    }
+
+    public mutating func setMedia(active: Bool) {
+        mediaActive = active
+        if sessions.isEmpty && !active { listOpen = false }
     }
 
     /// Появился запрос, который нужно показать сразу.
@@ -64,7 +71,7 @@ public struct IslandPresenter {
     }
 
     public mutating func toggleList() { listOpen.toggle() }
-    public mutating func setList(open: Bool) { listOpen = open && !sessions.isEmpty }
+    public mutating func setList(open: Bool) { listOpen = open && (!sessions.isEmpty || mediaActive) }
     public mutating func collapse() { listOpen = false }
 
     // MARK: сводка

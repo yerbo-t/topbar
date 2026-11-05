@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model = IslandViewModel(hub: hub, system: system)
         panel = IslandPanelController(model: model)
         menu = MenuController()
+        menu.onPlayerToggle = { [weak self] on in self?.model.setPlayerEnabled(on) }
 
         do { try hub.start() } catch SocketError.alreadyRunning {
             fatal("topbar уже запущен", "Сокет \(Paths.socketPath) слушает другой экземпляр.")
@@ -28,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        model.startPlayerIfEnabled()
         // Точное определение терминала в Ghostty: узнать (и при необходимости спросить) разрешение «Автоматизация».
         if !CommandLine.arguments.contains("--skip-onboarding") { GhosttyAccess.shared.refresh(ask: true) }
         let center = NotificationCenter.default
@@ -64,7 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationWillTerminate(_ notification: Notification) { hub?.stop() }
+    func applicationWillTerminate(_ notification: Notification) { hub?.stop(); model?.player.stop() }
 
     private func fatal(_ title: String, _ text: String) {
         let alert = NSAlert()

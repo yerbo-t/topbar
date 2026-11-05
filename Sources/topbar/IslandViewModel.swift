@@ -15,6 +15,12 @@ struct ShapeRect: Equatable {
 final class IslandViewModel: ObservableObject {
     private(set) var presenter = IslandPresenter()
     @Published private(set) var titles: [String: String] = [:]
+    /// Что играет в системе (nil — ничего) и обложка; положение в треке считает вид сам.
+    @Published private(set) var nowPlaying: NowPlaying?
+    @Published private(set) var artwork: NSImage?
+    private var pausedSince: Date?
+    private var pauseTimer: DispatchWorkItem?
+    let player = NowPlayingService()
     /// Фигура острова: меняется пружиной, пока окно больше неё (см. `IslandPanelController.layout`).
     @Published var shape = ShapeRect(x: 0, width: 0, height: 0, radius: 11)
     /// Размеры считаются один раз на изменение (замер текста не должен повторяться при каждой перерисовке).
@@ -63,7 +69,101 @@ final class IslandViewModel: ObservableObject {
                 done(self.system.hasNotchScreen && !self.isWatching(session))
             }
         }
+        player.onMessage = { [weak self] message in self?.handle(message) }
+        player.onUnavailable = { [weak self] in self?.playerUnavailable() }
         recomputeLayout()
+    }
+
+    // MARK: плеер
+
+    func startPlayerIfEnabled() { if Settings.playerEnabled { player.start() } }
+
+    func setPlayerEnabled(_ on: Bool) {
+        Settings.playerEnabled = on
+        if on {
+            player.start()
+        } else {
+            player.stop()
+            nowPlaying = nil
+            artwork = nil
+            updateMediaActive()
+        }
+    }
+
+    private func playerUnavailable() {
+        nowPlaying = nil
+        artwork = nil
+        updateMediaActive()
+    }
+
+    private func handle(_ message: NowPlayingMessage) {
+        switch message {
+        case .state(let state, let art):
+            applyArtwork(art)
+            let justPaused = (nowPlaying?.playing ?? false) && !state.playing
+            nowPlaying = state
+            if state.playing { pausedSince = nil } else if justPaused || pausedSince == nil { pausedSince = Date() }
+        case .nothing(let art):
+            applyArtwork(art)
+            nowPlaying = nil
+            pausedSince = nil
+        case .failure:
+            nowPlaying = nil
+        }
+        updateMediaActive()
+    }
+
+    private func applyArtwork(_ update: ArtworkUpdate) {
+        switch update {
+        case .unchanged: break
+        case .cleared: artwork = nil
+        case .data(let data): artwork = NSImage(data: data)
+        }
+    }
+
+    /// Показывать ли плеер: играет или недавно поставлен на паузу. Когда пауза затянется, остров уберёт плеер сам.
+    private func updateMediaActive() {
+        let visible = Settings.playerEnabled && MediaVisibility.isVisible(nowPlaying, pausedSince: pausedSince, now: Date())
+        apply { $0.setMedia(active: visible) }
+        pauseTimer?.cancel()
+        if visible, let nowPlaying, !nowPlaying.playing, let pausedSince {
+            let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.updateMediaActive() } }
+            pauseTimer = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(0.5, MediaVisibility.pauseGrace - Date().timeIntervalSince(pausedSince) + 0.5), execute: work)
+        }
+    }
+
+    /// Пауза или «играть» — явной командой по тому, что показано, а не «переключить»: так не перепутаем, если состояние устарело.
+    func mediaToggle() {
+        let willPlay = !(nowPlaying?.playing ?? false)
+        player.send(willPlay ? .play : .pause)
+        optimisticPlaying(willPlay)
+    }
+    func mediaNext() { player.send(.next) }
+    func mediaPrevious() { player.send(.previous) }
+
+    func mediaSeek(to seconds: Double) {
+        player.send(.seek(seconds))
+        if var state = nowPlaying {
+            state.elapsed = seconds
+            state.timestamp = Date()
+            nowPlaying = state
+        }
+    }
+
+    /// Кнопка реагирует сразу, не дожидаясь ответа системы (он придёт через ~0,1 с и поправит, если что).
+    private func optimisticPlaying(_ playing: Bool) {
+        guard var state = nowPlaying else { return }
+        state.elapsed = state.position(at: Date())
+        state.timestamp = Date()
+        state.playing = playing
+        nowPlaying = state
+    }
+
+    /// Название приложения, откуда играет (Dia, Spotify…).
+    var mediaSourceName: String? {
+        guard let pid = nowPlaying?.pid, pid > 0 else { return nil }
+        return NSRunningApplication(processIdentifier: pid_t(pid))?.localizedName
     }
 
     /// Владелец смотрит на сессию: приложение-хост активно, а для Ghostty — ещё и терминал сессии в фокусе.
@@ -86,6 +186,11 @@ final class IslandViewModel: ObservableObject {
     }
 
     private func computeEars() -> EarLayout {
+        // Только плеер, без сессий: слева обложка, справа «эквалайзер».
+        if presenter.mediaActive, presenter.summaryChips.isEmpty {
+            let width: CGFloat = 42
+            return EarLayout(style: .compact, left: [], right: [], leftWidth: width, rightWidth: min(width, availableRight ?? width))
+        }
         let font = NSFont.systemFont(ofSize: 12, weight: .medium)
         return EarLayout.make(chips: presenter.summaryChips, availableRight: availableRight) {
             ceil(($0 as NSString).size(withAttributes: [.font: font]).width)
@@ -138,7 +243,8 @@ final class IslandViewModel: ObservableObject {
             return CGSize(width: notchW + ears.leftWidth + ears.rightWidth, height: notchH)
         case .list:
             let rows = CGFloat(presenter.sessions.count)
-            return CGSize(width: Self.listWidth, height: notchH + 10 + rows * 54 + 40)
+            let player = presenter.mediaActive ? PlayerView.height : 0
+            return CGSize(width: Self.listWidth, height: notchH + 10 + player + rows * 54 + 40)
         case .card:
             guard let card = presenter.currentCard else { return .zero }
             // Оценка числа строк с переносами: ~46 символов моноширинного шрифта в строке карточки.
@@ -236,10 +342,10 @@ final class IslandViewModel: ObservableObject {
         case .hidden:
             return ["hidden"]
         case .collapsed:
-            return ["collapsed", "\(ears.style)", "\(ears.leftWidth)", "\(ears.rightWidth)"]
+            return ["collapsed", "\(ears.style)", "\(ears.leftWidth)", "\(ears.rightWidth)", "\(p.mediaActive)"]
                 + p.summaryParts.map { "\($0.status.rawValue):\($0.text)" }
         case .list:
-            return ["list"] + p.sessions.map {
+            return ["list", "\(p.mediaActive)"] + p.sessions.map {
                 "\($0.sessionId)|\(titles[$0.sessionId] ?? $0.project)|\($0.status.rawValue)|\($0.currentAction)|\($0.hostApp ?? "")|\($0.queue.count)"
             }
         case .card(let id):
