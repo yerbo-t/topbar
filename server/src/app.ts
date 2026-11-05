@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { basicAuth } from "hono/basic-auth";
 import { bodyLimit } from "hono/body-limit";
 import { getConnInfo } from "@hono/node-server/conninfo";
+import { isIP } from "node:net";
 import type { Context } from "hono";
 import type { Download, GithubAsset } from "./github.ts";
 import type { FeedbackIn, FeedbackRow, Install, Ping, Store } from "./store.ts";
@@ -137,6 +138,10 @@ export interface Options {
   /** Сколько прокси стоит перед службой (Coolify/Traefik — 1): адрес клиента берётся из X-Forwarded-For
    *  с конца, потому что левая часть заголовка подделывается клиентом. 0 — заголовку не верить. */
   trustedProxyHops?: number;
+  /** Заголовок, в котором первый в цепочке прокси (Cloudflare) передаёт адрес клиента, например cf-connecting-ip. Если он есть и
+   *  содержит настоящий IP, берётся он. Нужен там, где Traefik подменяет X-Forwarded-For адресом своего соседа. Включать только
+   *  когда служба доступна лишь через этот прокси: напрямую заголовок подделывается. Не задан — не используется. */
+  clientIpHeader?: string;
   /** Куда ведёт /download (последний релиз на GitHub). */
   downloadUrl?: string;
   /** Счётчики скачиваний с GitHub для страницы администратора (null — не подключены). */
@@ -144,7 +149,9 @@ export interface Options {
 }
 
 /** Адрес клиента: последний, дописанный доверенным прокси, а не первый, присланный клиентом. */
-export function clientIp(c: Context, hops: number): string {
+export function clientIp(c: Context, hops: number, header?: string): string {
+  const named = header ? c.req.header(header)?.trim() : undefined;
+  if (named && isIP(named)) return named;
   const forwarded = c.req.header("x-forwarded-for");
   if (hops > 0 && forwarded) {
     const parts = forwarded.split(",").map((part) => part.trim()).filter(Boolean);
@@ -171,7 +178,7 @@ export function createApp(store: Store, options: Options): Hono {
 
   /** Ограничение частоты: с одного адреса и со всех вместе. Возвращает адрес клиента или null, если пора притормозить. */
   const admit = (c: Context): string | null => {
-    const ip = clientIp(c, hops);
+    const ip = clientIp(c, hops, options.clientIpHeader);
     const now = Date.now();
     global = global.filter((t) => now - t < 60_000);
     if (global.length >= globalLimit) return null;

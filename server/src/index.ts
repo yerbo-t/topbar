@@ -15,9 +15,12 @@ const repo = process.env.GITHUB_REPO; // например yerbo-t/topbar: тог
 const downloadUrl = process.env.DOWNLOAD_URL ?? (repo ? `https://github.com/${repo}/releases/latest/download/topbar.dmg` : undefined);
 const hops = process.env.TRUSTED_PROXY_HOPS === undefined ? 1 : Number(process.env.TRUSTED_PROXY_HOPS);
 
+const clientIpHeader = process.env.CLIENT_IP_HEADER || undefined; // например cf-connecting-ip за Cloudflare
+
 const app = createApp(store, {
   adminPassword: password,
   trustedProxyHops: hops,
+  clientIpHeader,
   downloadUrl,
   githubDownloads: repo ? githubDownloads(repo) : undefined,
 });

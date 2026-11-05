@@ -73,6 +73,19 @@ test("подделанная левая часть X-Forwarded-For не обхо
   assert.equal((await post(good, { "x-forwarded-for": "3.3.3.3, 7.7.7.7" })).status, 429, "считается по правому адресу");
 });
 
+test("адрес клиента из заголовка Cloudflare: подмены цепочки и мусор не мешают", async () => {
+  const store = new Store(":memory:");
+  const app = createApp(store, { adminPassword: "correct-horse-battery", rateLimitPerMinute: 1, clientIpHeader: "cf-connecting-ip" });
+  const send = (headers: Record<string, string>) =>
+    app.request("/api/ping", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(good) });
+  assert.equal((await send({ "cf-connecting-ip": "203.0.113.7", "x-forwarded-for": "10.0.1.8" })).status, 200);
+  assert.equal(store.list()[0].ip, "203.0.113.7", "в записи адрес из заголовка, а не соседа Traefik");
+  assert.equal((await send({ "cf-connecting-ip": "203.0.113.7", "x-forwarded-for": "10.0.1.9" })).status, 429, "тот же человек считается одним");
+  assert.equal((await send({ "cf-connecting-ip": "203.0.113.8" })).status, 200, "другой адрес не страдает");
+  assert.equal((await send({ "cf-connecting-ip": "not-an-ip <script>", "x-forwarded-for": "5.5.5.5" })).status, 200, "мусор вместо адреса игнорируется");
+  assert.equal(store.list()[0].ip, "5.5.5.5", "тогда работает прежний разбор цепочки");
+});
+
 test("общий предел на минуту и предел числа установок", async () => {
   const store = new Store(":memory:");
   const app = createApp(store, { adminPassword: "correct-horse-battery", globalPerMinute: 4, maxInstalls: 2 });
