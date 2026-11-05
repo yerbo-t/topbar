@@ -1,3 +1,4 @@
+import CoreGraphics
 import XCTest
 @testable import TopbarCore
 
@@ -99,6 +100,60 @@ final class IslandPresenterTests: XCTestCase {
         XCTAssertFalse(WatchPolicy.isWatching(s, frontmostBundleId: nil))
         XCTAssertFalse(WatchPolicy.isWatching(session("b", .working, host: nil), frontmostBundleId: "com.mitchellh.ghostty"))
         XCTAssertTrue(WatchPolicy.isWatching(session("c", .working, host: "VS Code"), frontmostBundleId: "com.microsoft.VSCode"))
+    }
+
+    // MARK: уши свёрнутого острова
+
+    private func chip(_ status: SessionStatus, _ count: Int, _ word: String) -> SummaryChip {
+        SummaryChip(status: status, count: count, text: "\(count) \(word)")
+    }
+    private let fixedMeasure: (String) -> CGFloat = { CGFloat($0.count) * 7 }   // 7 пт на символ
+
+    func testEarsAreFullWhenThereIsRoomOrNoIcons() {
+        let chips = [chip(.waitingPermission, 1, "ждёт"), chip(.working, 2, "работает")]
+        let free = EarLayout.make(chips: chips, availableRight: nil, measure: fixedMeasure)
+        XCTAssertEqual(free.style, .full)
+        XCTAssertEqual(free.leftWidth, free.rightWidth, "уши симметричны")
+        let roomy = EarLayout.make(chips: chips, availableRight: 400, measure: fixedMeasure)
+        XCTAssertEqual(roomy, free)
+    }
+
+    func testEarsShrinkToFitBeforeIcons() {
+        let chips = [chip(.waitingPermission, 1, "ждёт"), chip(.working, 2, "работает")]
+        let full = EarLayout.make(chips: chips, availableRight: nil, measure: fixedMeasure)
+        for room in [full.rightWidth - 1, 60, 40] as [CGFloat] {
+            let e = EarLayout.make(chips: chips, availableRight: room, measure: fixedMeasure)
+            XCTAssertLessThanOrEqual(e.rightWidth, room, "правое ухо не заходит на значки (место \(room))")
+            XCTAssertNotEqual(e.style, .full)
+        }
+        XCTAssertEqual(EarLayout.make(chips: chips, availableRight: 40, measure: fixedMeasure).style, .compact)
+        XCTAssertEqual(EarLayout.make(chips: chips, availableRight: 32, measure: fixedMeasure).style, .dots)
+    }
+
+    func testWhenRightEarCannotFitEverythingMovesLeft() {
+        let chips = [chip(.waitingPermission, 1, "ждёт"), chip(.done, 1, "готово"), chip(.working, 2, "работает")]
+        let e = EarLayout.make(chips: chips, availableRight: 20, measure: fixedMeasure)
+        XCTAssertEqual(e.style, .merged)
+        XCTAssertEqual(e.rightWidth, 0)
+        XCTAssertEqual(e.left.count, 3)
+    }
+
+    func testThreeChipsAreSplitEvenlyBetweenEars() {
+        let chips = [chip(.waitingPermission, 1, "ждёт"), chip(.done, 1, "готово"), chip(.working, 2, "работает")]
+        let e = EarLayout.make(chips: chips, availableRight: nil, measure: fixedMeasure)
+        XCTAssertEqual(e.left.count, 2)
+        XCTAssertEqual(e.right.count, 1)
+        let tight = EarLayout.make(chips: chips, availableRight: 36, measure: fixedMeasure)
+        XCTAssertEqual(tight.style, .dots, "одна точка справа помещается в 36 пт")
+        XCTAssertLessThanOrEqual(tight.rightWidth, 36)
+    }
+
+    func testSingleChipKeepsTextOnTheLeftAndCapsTheRight() {
+        let e = EarLayout.make(chips: [chip(.working, 1, "работает")], availableRight: 36, measure: fixedMeasure)
+        XCTAssertEqual(e.style, .full)
+        XCTAssertEqual(e.right.count, 0)
+        XCTAssertEqual(e.rightWidth, 36)
+        XCTAssertGreaterThan(e.leftWidth, 36)
     }
 
     func testGhosttyWatchPolicyComparesTerminalWhenKnown() {

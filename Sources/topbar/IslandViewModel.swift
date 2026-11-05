@@ -9,7 +9,11 @@ final class IslandViewModel: ObservableObject {
     @Published private(set) var titles: [String: String] = [:]
     /// Размеры считаются один раз на изменение (замер текста не должен повторяться при каждой перерисовке).
     private(set) var size: CGSize = .zero
-    private(set) var earWidth: CGFloat = 110
+    /// Раскладка «ушей» свёрнутого острова: подстраивается под свободное место до значков справа от выреза.
+    private(set) var ears = EarLayout(style: .full, left: [], right: [], leftWidth: 110, rightWidth: 110)
+    /// Свободное место между вырезом и первым значком справа (nil — значков нет или не удалось узнать).
+    private var availableRight: CGFloat?
+    private var spaceCheckedAt = Date.distantPast
     private var pendingSessions: [Session]?
     private var flushTask: Task<Void, Never>?
     /// Список раскрыт кликом (остаётся, пока владелец не свернёт); наведением раскрывается временно.
@@ -67,21 +71,42 @@ final class IslandViewModel: ObservableObject {
 
     /// Пересчитать размеры; зовётся после каждого изменения состояния и смены экрана.
     func recomputeLayout() {
-        earWidth = computeEarWidth()
+        ears = computeEars()
         size = computeSize()
     }
 
-    /// Ширина «уха» по самому длинному содержимому (оба уха одинаковые, чтобы остров стоял симметрично у выреза).
-    private func computeEarWidth() -> CGFloat {
-        let parts = presenter.summaryParts
-        let left = parts.first.map { [$0] } ?? []
-        let right = Array(parts.dropFirst())
-        func width(_ items: [(status: SessionStatus, text: String)]) -> CGFloat {
-            let font = NSFont.systemFont(ofSize: 12, weight: .medium)
-            let texts = items.map { ($0.text as NSString).size(withAttributes: [.font: font]).width }
-            return texts.reduce(0) { $0 + $1 + 14 } + CGFloat(max(0, items.count - 1)) * 6 + 24
+    private func computeEars() -> EarLayout {
+        let font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        return EarLayout.make(chips: presenter.summaryChips, availableRight: availableRight) {
+            ceil(($0 as NSString).size(withAttributes: [.font: font]).width)
         }
-        return max(110, ceil(max(width(left), width(right))))
+    }
+
+    /// Узнать, сколько места до первого значка справа от выреза. true — место изменилось и остров надо пересобрать.
+    /// Значки меняются сами по себе (SwiftBar меняет заголовок, приложения добавляют и убирают значки), поэтому
+    /// пока остров свёрнут, это проверяется раз в пару секунд.
+    @discardableResult
+    func refreshMenuBarSpace(force: Bool = false) -> Bool {
+        guard let geometry else { return false }
+        if !force, Date().timeIntervalSince(spaceCheckedAt) < 0.5 { return false }
+        spaceCheckedAt = Date()
+        var free = MenuBarLayout.freeSpaceRightOfNotch(on: geometry.screen, notchWidth: geometry.notchWidth)
+        // Отладка: подставить свободное место (`--debug-free-right 36`), чтобы проверить виды ушей без значков.
+        if let i = CommandLine.arguments.firstIndex(of: "--debug-free-right"), i + 1 < CommandLine.arguments.count,
+           let value = Double(CommandLine.arguments[i + 1]) { free = CGFloat(value) }
+        let changed: Bool
+        switch (free, availableRight) {
+        case (nil, nil): changed = false
+        case let (a?, b?): changed = abs(a - b) >= 2
+        default: changed = true
+        }
+        if changed { availableRight = free; recomputeLayout() }
+        return changed
+    }
+
+    /// Сдвиг центра окна от середины экрана: свёрнутый остров может быть несимметричным (справа места мало).
+    var centerShift: CGFloat {
+        presenter.mode == .collapsed ? (ears.rightWidth - ears.leftWidth) / 2 : 0
     }
 
     private func computeSize() -> CGSize {
@@ -91,7 +116,7 @@ final class IslandViewModel: ObservableObject {
         case .hidden:
             return .zero
         case .collapsed:
-            return CGSize(width: notchW + 2 * earWidth, height: notchH)
+            return CGSize(width: notchW + ears.leftWidth + ears.rightWidth, height: notchH)
         case .list:
             let rows = CGFloat(presenter.sessions.count)
             return CGSize(width: Self.listWidth, height: notchH + 10 + rows * 54 + 40)
@@ -189,7 +214,8 @@ final class IslandViewModel: ObservableObject {
         case .hidden:
             return ["hidden"]
         case .collapsed:
-            return ["collapsed"] + p.summaryParts.map { "\($0.status.rawValue):\($0.text)" }
+            return ["collapsed", "\(ears.style)", "\(ears.leftWidth)", "\(ears.rightWidth)"]
+                + p.summaryParts.map { "\($0.status.rawValue):\($0.text)" }
         case .list:
             return ["list"] + p.sessions.map {
                 "\($0.sessionId)|\(titles[$0.sessionId] ?? $0.project)|\($0.status.rawValue)|\($0.currentAction)|\($0.hostApp ?? "")|\($0.queue.count)"

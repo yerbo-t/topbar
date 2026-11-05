@@ -69,22 +69,24 @@ public struct IslandPresenter {
 
     // MARK: сводка
 
-    /// «1 ждёт · 1 готово · 2 работает»; нули опускаются. Простаивающие показываются, только если больше нечего
-    /// показать («2 простаивает»), иначе остров был бы пустой чёрной плашкой.
-    public var summaryParts: [(status: SessionStatus, text: String)] {
+    /// Пункты сводки: «1 ждёт · 1 готово · 2 работает»; нули опускаются. Простаивающие показываются, только если больше
+    /// нечего показать («2 простаивает»), иначе остров был бы пустой чёрной плашкой.
+    public var summaryChips: [SummaryChip] {
         var counts: [SessionStatus: Int] = [:]
         for s in sessions { counts[s.status, default: 0] += 1 }
-        func part(_ status: SessionStatus, _ word: (Int) -> String) -> (SessionStatus, String)? {
-            counts[status].map { (status, word($0)) }
+        func chip(_ status: SessionStatus, _ word: (Int) -> String) -> SummaryChip? {
+            counts[status].map { SummaryChip(status: status, count: $0, text: word($0)) }
         }
         let active = [
-            part(.waitingPermission) { "\($0) ждёт" },
-            part(.done) { "\($0) готово" },
-            part(.working) { "\($0) работает" },
+            chip(.waitingPermission) { "\($0) ждёт" },
+            chip(.done) { "\($0) готово" },
+            chip(.working) { "\($0) работает" },
         ].compactMap { $0 }
-        if active.isEmpty, let idle = part(.idle, { "\($0) простаивает" }) { return [idle] }
+        if active.isEmpty, let idle = chip(.idle, { "\($0) простаивает" }) { return [idle] }
         return active
     }
+
+    public var summaryParts: [(status: SessionStatus, text: String)] { summaryChips.map { ($0.status, $0.text) } }
 
     public var summaryText: String { summaryParts.map(\.text).joined(separator: " · ") }
 

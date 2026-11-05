@@ -93,13 +93,12 @@ struct CollapsedView: View {
     @ObservedObject var model: IslandViewModel
 
     var body: some View {
-        let parts = model.presenter.summaryParts
+        let ears = model.ears
         let notchW = model.geometry?.notchWidth ?? 200
-        let earW = model.earWidth
         HStack(spacing: 0) {
-            ear(parts.first.map { [$0] } ?? [], alignment: .trailing, width: earW)
+            ear(ears.left, style: ears.style, alignment: .trailing, width: ears.leftWidth)
             Spacer().frame(width: notchW)
-            ear(Array(parts.dropFirst()), alignment: .leading, width: earW)
+            ear(ears.right, style: ears.style, alignment: .leading, width: ears.rightWidth)
         }
         .frame(height: model.geometry?.notchHeight ?? 32)
         .contentShape(Rectangle())
@@ -109,16 +108,23 @@ struct CollapsedView: View {
         .accessibilityAddTraits(.isButton)
     }
 
-    private func ear(_ parts: [(status: SessionStatus, text: String)], alignment: Alignment, width: CGFloat) -> some View {
-        HStack(spacing: 6) {
-            ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
-                StatusDot(status: part.status)
-                Text(part.text).font(.system(size: 12, weight: .medium)).lineLimit(1)
+    private func ear(_ chips: [SummaryChip], style: EarStyle, alignment: Alignment, width: CGFloat) -> some View {
+        HStack(spacing: style == .dots ? 6 : 10) {
+            ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
+                HStack(spacing: style == .full ? 6 : 4) {
+                    StatusDot(status: chip.status)
+                    switch style {
+                    case .full: Text(chip.text).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                    case .compact, .merged: Text("\(chip.count)").font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                    case .dots: EmptyView()
+                    }
+                }
             }
         }
         .padding(.horizontal, 10)
         .fixedSize()
         .frame(width: width, alignment: alignment)
+        .clipped()
     }
 }
 
