@@ -1,4 +1,6 @@
 FROM node:24-slim
+# curl нужен проверке здоровья Coolify (в лёгком образе его нет: без него Coolify считает запуск неудачным и откатывает).
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
