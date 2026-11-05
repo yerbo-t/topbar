@@ -1,63 +1,109 @@
-// Рисует значок приложения (остров с двумя точками статуса и строками списка) и собирает scripts/AppIcon.icns.
-// Использование: swiftc -O scripts/tools/make-icon.swift -o /tmp/make-icon && /tmp/make-icon scripts/AppIcon.icns
+// Рисует значок topbar по рисунку владельца и собирает scripts/AppIcon.icon (формат Icon Composer: светлый и тёмный вид).
+// Буквы «pBar» превращаются в контуры шрифтом SF Rounded, поэтому значок не зависит от шрифтов на чужом Mac.
+// Использование: swiftc -O scripts/tools/make-icon.swift -o /tmp/make-icon && /tmp/make-icon scripts/AppIcon.icon
 import AppKit
-import CoreGraphics
+import CoreText
 
-func render(size: Int) -> Data {
-    let s = CGFloat(size) / 1024
-    let space = CGColorSpaceCreateDeviceRGB()
-    let ctx = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0, space: space,
-                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-    ctx.scaleBy(x: s, y: s)
+struct Palette {
+    let background: String   // "srgb:r,g,b,1" для icon.json
+    let plate: String        // плашка и ножка (hex)
+    let ink: String          // буквы и кружок на плашке (hex)
+    let dot: String          // серая точка внутри кружка
+}
+let light = Palette(background: "srgb:0.96078,0.96078,0.96863,1.00000", plate: "#0A0A0C", ink: "#F6F6F7", dot: "#8A8D97")
+let dark = Palette(background: "srgb:0.04314,0.04314,0.05098,1.00000", plate: "#F6F6F7", ink: "#0A0A0C", dot: "#8A8D97")
 
-    // Плитка по шаблону macOS: 824 пт внутри 1024, радиус около 185.
-    let tile = CGRect(x: 100, y: 100, width: 824, height: 824)
-    let tilePath = CGPath(roundedRect: tile, cornerWidth: 185, cornerHeight: 185, transform: nil)
-    ctx.saveGState()
-    ctx.setShadow(offset: CGSize(width: 0, height: -14), blur: 28, color: CGColor(gray: 0, alpha: 0.35))
-    ctx.addPath(tilePath); ctx.setFillColor(CGColor(gray: 0.1, alpha: 1)); ctx.fillPath()
-    ctx.restoreGState()
-    ctx.saveGState()
-    ctx.addPath(tilePath); ctx.clip()
-    let gradient = CGGradient(colorsSpace: space, colors: [CGColor(red: 0.27, green: 0.31, blue: 0.47, alpha: 1),
-                                                           CGColor(red: 0.07, green: 0.08, blue: 0.14, alpha: 1)] as CFArray, locations: [0, 1])!
-    ctx.drawLinearGradient(gradient, start: CGPoint(x: 200, y: 924), end: CGPoint(x: 800, y: 100), options: [])
-    ctx.restoreGState()
-
-    // «Остров»: чёрная капсула у верхнего края плитки.
-    let island = CGRect(x: 232, y: 640, width: 560, height: 170)
-    let islandPath = CGPath(roundedRect: island, cornerWidth: 85, cornerHeight: 85, transform: nil)
-    ctx.addPath(islandPath); ctx.setFillColor(CGColor(gray: 0, alpha: 1)); ctx.fillPath()
-    ctx.addPath(islandPath); ctx.setStrokeColor(CGColor(gray: 1, alpha: 0.14)); ctx.setLineWidth(4); ctx.strokePath()
-    // Две точки статуса по краям.
-    for (x, color) in [(CGFloat(335), CGColor(red: 0.35, green: 0.65, blue: 1, alpha: 1)), (CGFloat(689), CGColor(red: 0.27, green: 0.78, blue: 0.47, alpha: 1))] {
-        ctx.setFillColor(color)
-        ctx.fillEllipse(in: CGRect(x: x - 30, y: island.midY - 30, width: 60, height: 60))
+/// Контуры слов шрифтом SF Rounded Heavy: путь SVG, ширина и высота (базовая линия внутри рамки).
+func textPath(_ string: String, size: CGFloat) -> (d: String, width: CGFloat, ascent: CGFloat, descent: CGFloat) {
+    let base = NSFont.systemFont(ofSize: size, weight: .heavy)
+    let descriptor = base.fontDescriptor.withDesign(.rounded) ?? base.fontDescriptor
+    let font = (NSFont(descriptor: descriptor, size: size) ?? base) as CTFont
+    var chars = Array(string.utf16)
+    var glyphs = [CGGlyph](repeating: 0, count: chars.count)
+    CTFontGetGlyphsForCharacters(font, &chars, &glyphs, chars.count)
+    var advances = [CGSize](repeating: .zero, count: chars.count)
+    CTFontGetAdvancesForGlyphs(font, .horizontal, glyphs, &advances, chars.count)
+    var d = ""
+    var x: CGFloat = 0
+    for (index, glyph) in glyphs.enumerated() {
+        if let path = CTFontCreatePathForGlyph(font, glyph, nil) {
+            var move = CGAffineTransform(translationX: x, y: 0)
+            if let moved = path.copy(using: &move) {
+                moved.applyWithBlock { element in
+                    let e = element.pointee
+                    func f(_ p: CGPoint) -> String { String(format: "%.1f %.1f", p.x, -p.y) }
+                    switch e.type {
+                    case .moveToPoint: d += "M\(f(e.points[0]))"
+                    case .addLineToPoint: d += "L\(f(e.points[0]))"
+                    case .addQuadCurveToPoint: d += "Q\(f(e.points[0])) \(f(e.points[1]))"
+                    case .addCurveToPoint: d += "C\(f(e.points[0])) \(f(e.points[1])) \(f(e.points[2]))"
+                    case .closeSubpath: d += "Z"
+                    @unknown default: break
+                    }
+                }
+            }
+        }
+        x += advances[index].width
     }
-
-    // Строки раскрытого списка под островом.
-    ctx.setFillColor(CGColor(gray: 1, alpha: 0.22))
-    for (i, width) in [CGFloat(470), CGFloat(390), CGFloat(300)].enumerated() {
-        let y = 540 - CGFloat(i) * 90
-        let row = CGRect(x: 512 - width / 2, y: y, width: width, height: 44)
-        ctx.addPath(CGPath(roundedRect: row, cornerWidth: 22, cornerHeight: 22, transform: nil)); ctx.fillPath()
-    }
-    let image = ctx.makeImage()!
-    let rep = NSBitmapImageRep(cgImage: image)
-    return rep.representation(using: .png, properties: [:])!
+    return (d, x, CTFontGetAscent(font), CTFontGetDescent(font))
 }
 
-let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "AppIcon.icns"
-let dir = NSTemporaryDirectory() + "AppIcon.iconset"
-try? FileManager.default.removeItem(atPath: dir)
-try! FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-for base in [16, 32, 128, 256, 512] {
-    try! render(size: base).write(to: URL(fileURLWithPath: "\(dir)/icon_\(base)x\(base).png"))
-    try! render(size: base * 2).write(to: URL(fileURLWithPath: "\(dir)/icon_\(base)x\(base)@2x.png"))
+let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "AppIcon.icon"
+let assets = out + "/Assets"
+try? FileManager.default.removeItem(atPath: out)
+try! FileManager.default.createDirectory(atPath: assets, withIntermediateDirectories: true)
+
+// Раскладка на холсте 1024×1024 (значок целиком, форму скругления накладывает система).
+let text = textPath("pBar", size: 200)
+let capHeight: CGFloat = 112
+let scale = capHeight / (NSFont.systemFont(ofSize: 200, weight: .heavy).capHeight)
+let textWidth = text.width * scale
+let textLeft: CGFloat = 340
+let baseline: CGFloat = 164
+
+func plateSVG(_ p: Palette) -> String {
+    """
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+      <path d="M112 0H912V162Q912 262 812 262H212Q112 262 112 162Z" fill="\(p.plate)"/>
+      <circle cx="252" cy="120" r="52" fill="\(p.ink)"/>
+      <circle cx="252" cy="120" r="19" fill="\(p.dot)"/>
+      <path transform="translate(\(textLeft) \(baseline)) scale(\(String(format: "%.4f", scale)))" d="\(text.d)" fill="\(p.ink)"/>
+    </svg>
+    """
 }
-let p = Process()
-p.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
-p.arguments = ["-c", "icns", dir, "-o", out]
-try! p.run(); p.waitUntilExit()
-try? FileManager.default.removeItem(atPath: dir)
-print(p.terminationStatus == 0 ? "значок: \(out)" : "iconutil не справился")
+func stemSVG(_ p: Palette) -> String {
+    """
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+      <rect x="372" y="386" width="280" height="478" rx="78" fill="\(p.plate)"/>
+    </svg>
+    """
+}
+try! plateSVG(light).write(toFile: assets + "/plate-light.svg", atomically: true, encoding: .utf8)
+try! plateSVG(dark).write(toFile: assets + "/plate-dark.svg", atomically: true, encoding: .utf8)
+try! stemSVG(light).write(toFile: assets + "/stem-light.svg", atomically: true, encoding: .utf8)
+try! stemSVG(dark).write(toFile: assets + "/stem-dark.svg", atomically: true, encoding: .utf8)
+print("ширина текста \(Int(textWidth)) пт, справа остаётся \(Int(912 - textLeft - textWidth)) пт")
+
+let json = """
+{
+  "fill" : { "solid" : "\(light.background)" },
+  "fill-specializations" : [
+    { "appearance" : "dark", "value" : { "solid" : "\(dark.background)" } }
+  ],
+  "groups" : [
+    {
+      "layers" : [
+        { "glass" : false, "hidden-specializations" : [ { "appearance" : "dark", "value" : true } ], "image-name" : "stem-light.svg", "name" : "stem-light" },
+        { "glass" : false, "hidden-specializations" : [ { "appearance" : "dark", "value" : true } ], "image-name" : "plate-light.svg", "name" : "plate-light" },
+        { "glass" : false, "hidden-specializations" : [ { "appearance" : "light", "value" : true } ], "image-name" : "stem-dark.svg", "name" : "stem-dark" },
+        { "glass" : false, "hidden-specializations" : [ { "appearance" : "light", "value" : true } ], "image-name" : "plate-dark.svg", "name" : "plate-dark" }
+      ],
+      "shadow" : { "kind" : "neutral", "opacity" : 0.4 },
+      "translucency" : { "enabled" : false, "value" : 0 }
+    }
+  ],
+  "supported-platforms" : { "squares" : [ "macOS" ] }
+}
+"""
+try! json.write(toFile: out + "/icon.json", atomically: true, encoding: .utf8)
+print("значок: \(out)")

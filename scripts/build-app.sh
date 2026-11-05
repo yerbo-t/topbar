@@ -54,8 +54,13 @@ text = text.replace("@VERSION@", version).replace("@BUILD@", build).replace("@SP
 open("build/topbar.app/Contents/Info.plist", "w", encoding="utf-8").write(text)
 PY
 
-# Значок.
-if [[ -f scripts/AppIcon.icns ]]; then cp scripts/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"; fi
+# Значок: scripts/AppIcon.icon (светлый и тёмный вид, рисуется scripts/tools/make-icon.swift) → AppIcon.icns для старых macOS и
+# Assets.car для macOS 26, который сам переключает вид по теме.
+ICON_OUT="$(mktemp -d)"
+xcrun actool scripts/AppIcon.icon --compile "$ICON_OUT" --platform macosx --minimum-deployment-target 14.0 \
+    --app-icon AppIcon --output-partial-info-plist "$ICON_OUT/partial.plist" > /dev/null
+cp "$ICON_OUT/AppIcon.icns" "$ICON_OUT/Assets.car" "$APP/Contents/Resources/"
+rm -rf "$ICON_OUT"
 
 # Помощник плеера (грузится внутрь системного perl, см. native/nowplaying.m). Копия в build/ нужна запускам из .build/debug.
 clang -dynamiclib -fobjc-arc -fvisibility=default -mmacosx-version-min=14.0 -framework Foundation \

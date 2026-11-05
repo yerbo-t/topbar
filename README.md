@@ -7,7 +7,7 @@
 
 ## Установка
 
-1. Скачайте `topbar.dmg` из [последнего релиза](https://github.com/yerbo-t/topbar/releases/latest) и перетащите topbar в «Программы».
+1. Скачайте [topbar.dmg](https://topbar.finea.kz/download) (то же самое лежит в [релизах GitHub](https://github.com/yerbo-t/topbar/releases/latest)) и перетащите topbar в «Программы».
 2. Первый запуск. Приложение подписано автором, а не Apple, поэтому macOS предупредит. Откройте «Системные настройки», раздел
    «Конфиденциальность и безопасность», нажмите «Всё равно открыть» рядом с сообщением про topbar. Либо в Терминале:
    `xattr -dr com.apple.quarantine /Applications/topbar.app`.

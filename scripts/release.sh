@@ -6,7 +6,7 @@
 #   TOPBAR_GITHUB_REPO    репозиторий релизов (по умолчанию yerbo-t/topbar)
 #   TOPBAR_FEED_URL       адрес appcast.xml, вшивается в приложение (по умолчанию — последний релиз GitHub)
 #   TOPBAR_DOWNLOAD_BASE  каталог, откуда скачиваются zip и dmg, без завершающего «/» (по умолчанию — релиз vВЕРСИЯ на GitHub)
-#   TOPBAR_SERVER_URL     адрес службы аналитики и отзывов (необязательно; см. build-app.sh)
+#   TOPBAR_SERVER_URL     адрес службы аналитики и отзывов (по умолчанию https://topbar.finea.kz; выпускать только когда служба уже работает)
 #   TOPBAR_VERSION, TOPBAR_BUILD — версия и номер сборки (по умолчанию VERSION и время сборки)
 #   TOPBAR_ALLOW_HTTP=1   разрешить http (только проверка обновлений на своём Mac)
 # Использование: scripts/release.sh [файл-с-описанием.html]
@@ -19,6 +19,7 @@ REPO="${TOPBAR_GITHUB_REPO:-yerbo-t/topbar}"
 TOPBAR_FEED_URL="${TOPBAR_FEED_URL:-https://github.com/$REPO/releases/latest/download/appcast.xml}"
 TOPBAR_DOWNLOAD_BASE="${TOPBAR_DOWNLOAD_BASE:-https://github.com/$REPO/releases/download/v$VERSION}"
 export TOPBAR_FEED_URL
+export TOPBAR_SERVER_URL="${TOPBAR_SERVER_URL:-https://topbar.finea.kz}"
 BUILD="${TOPBAR_BUILD:-$(date +%Y%m%d%H%M)}"
 export TOPBAR_VERSION="$VERSION" TOPBAR_BUILD="$BUILD"
 SIGN_DIR="$HOME/Library/Application Support/topbar-signing"
