@@ -68,16 +68,26 @@ clang -dynamiclib -fobjc-arc -fvisibility=default -mmacosx-version-min=14.0 -fra
 cp build/libtbnowplaying.dylib "$APP/Contents/Resources/libtbnowplaying.dylib"
 
 # Подпись: изнутри наружу, без --deep.
+# codesign не находит сертификат в связке, которой нет в списке поиска (--keychain тут не помогает), поэтому на время подписи связка
+# «topbar-signing» добавляется в список, а по выходу (в том числе при ошибке) список возвращается как был.
 IDENTITY="-"
-KC_ARGS=()
+SEARCH_LIST=()
+restore_search_list() {
+    if [[ ${#SEARCH_LIST[@]} -gt 0 ]]; then security list-keychains -d user -s "${SEARCH_LIST[@]}" > /dev/null; SEARCH_LIST=(); fi
+}
+trap restore_search_list EXIT
 if [[ -f "$KEYCHAIN" ]] && security unlock-keychain -p "$(cat "$SIGN_DIR/keychain-password")" "$KEYCHAIN" 2>/dev/null \
    && security find-identity -v -p codesigning "$KEYCHAIN" 2>/dev/null | grep -q "topbar release"; then
     IDENTITY="topbar release"
-    KC_ARGS=(--keychain "$KEYCHAIN")
+    while IFS= read -r line; do
+        line="${line#"${line%%[![:space:]]*}"}"; line="${line%\"}"; line="${line#\"}"
+        [[ -n "$line" ]] && SEARCH_LIST+=("$line")
+    done < <(security list-keychains -d user)
+    security list-keychains -d user -s "$KEYCHAIN" "${SEARCH_LIST[@]}" > /dev/null
 else
     echo "ВНИМАНИЕ: сертификат «topbar release» не доверенный — подписываю ad-hoc (после установки разрешения придётся включать заново)."
 fi
-sign() { codesign --force --sign "$IDENTITY" ${KC_ARGS[@]+"${KC_ARGS[@]}"} "$@"; }
+sign() { codesign --force --sign "$IDENTITY" "$@"; }
 FW="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
 for part in "$FW/XPCServices/Installer.xpc" "$FW/XPCServices/Downloader.xpc" "$FW/Autoupdate" "$FW/Updater.app"; do
     [[ -e "$part" ]] && sign "$part"
