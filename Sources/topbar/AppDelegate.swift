@@ -27,6 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Точное определение терминала в Ghostty: узнать (и при необходимости спросить) разрешение «Автоматизация».
+        if !CommandLine.arguments.contains("--skip-onboarding") { GhosttyAccess.shared.refresh(ask: true) }
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -37,6 +39,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         })
         let ws = NSWorkspace.shared.notificationCenter
+        observers.append(ws.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            if app?.bundleIdentifier == GhosttyScripting.bundleId { GhosttyAccess.shared.refresh(ask: true) }
+        })
         observers.append(ws.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.model.releaseCards() }
         })

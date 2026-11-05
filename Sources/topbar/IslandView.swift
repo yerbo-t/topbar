@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import TopbarCore
 
@@ -21,22 +22,46 @@ extension SessionStatus {
     }
 }
 
+/// Точка статуса. Мигание «ждёт» рисует Core Animation в отдельном процессе системы: анимация на SwiftUI
+/// держала бы приложение на ~3% процессора всё время ожидания.
 struct StatusDot: View {
     let status: SessionStatus
-    @State private var dim = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Circle()
-            .fill(status.color)
-            .frame(width: 8, height: 8)
-            .opacity(status == .waitingPermission && dim ? 0.35 : 1)
-            .onAppear {
-                guard status == .waitingPermission, !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { dim = true }
+        Group {
+            if status == .waitingPermission {
+                PulsingDot(color: NSColor(status.color))
+            } else {
+                Circle().fill(status.color)
             }
-            .accessibilityHidden(true)
+        }
+        .frame(width: 8, height: 8)
+        .accessibilityHidden(true)
     }
+}
+
+struct PulsingDot: NSViewRepresentable {
+    let color: NSColor
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 8, height: 8))
+        view.wantsLayer = true
+        view.layer?.cornerRadius = 4
+        view.layer?.backgroundColor = color.cgColor
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            let pulse = CABasicAnimation(keyPath: "opacity")
+            pulse.fromValue = 1.0
+            pulse.toValue = 0.35
+            pulse.duration = 0.8
+            pulse.autoreverses = true
+            pulse.repeatCount = .infinity
+            pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            view.layer?.add(pulse, forKey: "pulse")
+        }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {}
 }
 
 struct IslandView: View {

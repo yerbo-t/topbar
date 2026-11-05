@@ -5,7 +5,7 @@ import TopbarCore
 /// Связывает хаб сессий с видом: хранит состояние острова и принимает действия владельца.
 @MainActor
 final class IslandViewModel: ObservableObject {
-    @Published private(set) var presenter = IslandPresenter()
+    private(set) var presenter = IslandPresenter()
     @Published private(set) var titles: [String: String] = [:]
     /// Размеры считаются один раз на изменение (замер текста не должен повторяться при каждой перерисовке).
     private(set) var size: CGSize = .zero
@@ -45,7 +45,7 @@ final class IslandViewModel: ObservableObject {
         // Решение «раскрывать ли остров сам» принимаем на главном потоке (AppleScript не любит других) и не блокируем хаб.
         hub.autoOpenDecider = { [weak self] session, _, done in
             Task { @MainActor in
-                guard let self else { return done(false) }
+                guard let self, !CommandLine.arguments.contains("--debug-no-autoopen") else { return done(false) }
                 done(self.system.hasNotchScreen && !self.isWatching(session))
             }
         }
@@ -170,12 +170,34 @@ final class IslandViewModel: ObservableObject {
     private func apply(_ change: (inout IslandPresenter) -> Void) {
         var next = presenter
         change(&next)
+        let before = visibleKey(presenter, titles: titles)
         presenter = next
         recomputeLayout()
         if CommandLine.arguments.contains("--debug") {
             FileHandle.standardError.write(Data("[island] mode=\(next.mode) summary=\"\(next.summaryText)\" sessions=\(next.sessions.map { "\($0.project):\($0.status)" })\n".utf8))
         }
-        onLayoutChange?()
+        // Вид перерисовываем, только если изменилось то, что на нём видно в текущем режиме.
+        if visibleKey(next, titles: titles) != before {
+            objectWillChange.send()
+            onLayoutChange?()
+        }
+    }
+
+    /// Всё, что видно на экране в текущем режиме (в свёрнутом виде это только сводка, в списке — строки, на карточке — запрос).
+    private func visibleKey(_ p: IslandPresenter, titles: [String: String]) -> [String] {
+        switch p.mode {
+        case .hidden:
+            return ["hidden"]
+        case .collapsed:
+            return ["collapsed"] + p.summaryParts.map { "\($0.status.rawValue):\($0.text)" }
+        case .list:
+            return ["list"] + p.sessions.map {
+                "\($0.sessionId)|\(titles[$0.sessionId] ?? $0.project)|\($0.status.rawValue)|\($0.currentAction)|\($0.hostApp ?? "")|\($0.queue.count)"
+            }
+        case .card(let id):
+            let session = p.currentCard?.session
+            return ["card", id, session?.sessionId ?? "", titles[session?.sessionId ?? ""] ?? "", "\(p.queuedBehindCurrent)", session?.permissionMode ?? ""]
+        }
     }
 
     /// События идут потоком (каждый вызов инструмента — два): копим и перерисовываем не чаще раза в 40 мс.
@@ -193,8 +215,11 @@ final class IslandViewModel: ObservableObject {
         flushTask = nil
         guard let sessions = pendingSessions else { return }
         pendingSessions = nil
+        let newTitles = SessionStore.displayTitles(sessions)
+        if newTitles != titles {
+            titles = newTitles          // сначала названия, чтобы вид собрался с актуальными подписями
+        }
         apply { $0.update(sessions: sessions) }
-        titles = SessionStore.displayTitles(sessions)
         if CommandLine.arguments.contains("--debug-open-list"), !sessions.isEmpty, !pinned { toggleList() }
     }
 

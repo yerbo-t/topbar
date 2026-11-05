@@ -22,12 +22,18 @@ final class MenuController: NSObject, NSMenuDelegate {
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        GhosttyAccess.shared.refresh(ask: false)
         menu.removeAllItems()
         let status = NSMenuItem(title: "Хуки Claude Code: \(hooks.statusText())", action: nil, keyEquivalent: "")
         status.isEnabled = false
         menu.addItem(status)
         menu.addItem(item("Установить хуки…", #selector(installHooks)))
         menu.addItem(item("Удалить хуки…", #selector(removeHooks)))
+        let ghostty = NSMenuItem(title: GhosttyAccess.shared.isGranted
+            ? "Ghostty: точный терминал определяется"
+            : "Ghostty: определяю по приложению (нет доступа «Автоматизация»)", action: nil, keyEquivalent: "")
+        ghostty.isEnabled = false
+        menu.addItem(ghostty)
         menu.addItem(.separator())
         let login = item("Запускать при входе", #selector(toggleLogin))
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
