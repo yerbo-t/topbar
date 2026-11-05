@@ -10,6 +10,7 @@ final class MenuController: NSObject, NSMenuDelegate {
     private let menu = NSMenu()
     private let hooks = HooksController()
     private let hider = MenuBarHider()
+    private let list = MenuBarListController()
 
     override init() {
         if Settings.hidesMenuBarIcons { MenuBarHider.seedPositions() }
@@ -22,11 +23,18 @@ final class MenuController: NSObject, NSMenuDelegate {
             button.action = #selector(statusClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
-        hider.onStateChange = { [weak self] in self?.updateIcon() }
+        list.model.onNeedsSetup = { [weak self] in self?.list.hide(); self?.showSetupHint() }
+        hider.onStateChange = { [weak self] in self?.updateIcon(); self?.list.model.objectWillChange.send() }
         hider.onSafetyRevert = { [weak self] in self?.showSafetyAlert() }
-        if Settings.hidesMenuBarIcons { hider.enable(control: statusItem) }
+        if Settings.hidesMenuBarIcons { hider.enable(control: statusItem); list.model.hider = hider }
         updateIcon()
         if CommandLine.arguments.contains("--debug-hider-selftest") { hider.selfTest() }
+        if CommandLine.arguments.contains("--debug-open-icon-list") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self, let frame = self.statusItem.button?.window?.frame else { return }
+                self.list.show(anchoredTo: frame)
+            }
+        }
     }
 
     // MARK: значок и клики
@@ -36,13 +44,13 @@ final class MenuController: NSObject, NSMenuDelegate {
         let name: String
         if !hider.isEnabled {
             name = "capsule.portrait.tophalf.filled"
-            button.toolTip = "topbar — сессии Claude Code"
+            button.toolTip = "Значки строки меню (правый клик — меню topbar)"
         } else if hider.isCollapsed {
             name = "chevron.left"
-            button.toolTip = "Показать спрятанные значки (правый клик — меню topbar)"
+            button.toolTip = "Значки строки меню (правый клик — меню topbar)"
         } else {
             name = "chevron.right"
-            button.toolTip = "Спрятать значки (правый клик — меню topbar)"
+            button.toolTip = "Значки строки меню (правый клик — меню topbar)"
         }
         let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
         button.image = (NSImage(systemSymbolName: name, accessibilityDescription: "topbar")
@@ -52,24 +60,26 @@ final class MenuController: NSObject, NSMenuDelegate {
 
     @objc private func statusClicked() {
         let event = NSApp.currentEvent
-        let wantsMenu = !hider.isEnabled || event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true
-        if wantsMenu {
+        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
+            list.hide()
             statusItem.menu = menu
             statusItem.button?.performClick(nil)
             statusItem.menu = nil      // иначе левый клик снова открывал бы меню
             return
         }
-        if hider.toggle() == .needsSetup { showSetupHint() }
+        guard let frame = statusItem.button?.window?.frame else { return }
+        list.toggle(anchoredTo: frame)
     }
 
     private func showSetupHint() {
         let alert = NSAlert()
         alert.messageText = "Расставьте значки один раз"
         alert.informativeText = """
-            Всё, что стоит левее черты «│», кнопка «\(hider.isCollapsed ? "‹" : "›")» прячет. Сейчас черта стоит у самого правого края, поэтому левее неё все значки.
+            Всё, что стоит левее черты «│», прячется кнопкой «Спрятать значки» в списке (левый клик по значку «›»). \
+            Сейчас черта стоит у самого правого края, поэтому левее неё все значки.
 
             Зажмите ⌘ и перетащите черту «│» влево — так, чтобы слева от неё остались только те значки, которые хотите прятать. \
-            Дальше клик по «›» прячет их, второй клик возвращает; спрятанное закрывается само через \(Int(MenuBarHider.autoCollapseDelay)) с.
+            Спрятанное закрывается само через \(Int(MenuBarHider.autoCollapseDelay)) с после показа.
 
             Меню приложения — правый клик по «›».
             """
@@ -129,7 +139,7 @@ final class MenuController: NSObject, NSMenuDelegate {
 
     @objc func toggleHiding() {
         Settings.hidesMenuBarIcons.toggle()
-        if Settings.hidesMenuBarIcons { hider.enable(control: statusItem) } else { hider.disable() }
+        if Settings.hidesMenuBarIcons { hider.enable(control: statusItem); list.model.hider = hider } else { hider.disable(); list.model.hider = nil }
         updateIcon()
     }
     @objc func quit() { NSApp.terminate(nil) }
