@@ -49,10 +49,24 @@ final class MenuBarListModel: ObservableObject {
         }
     }
 
+    /// Системный запрос доступа (показывается один раз) и сразу окно настроек: повторно система запрос не показывает.
     func requestAccess() {
         MenuBarItemsProvider.requestAccess()
-        // Системная панель настроек открывается сама; проверим доступ ещё раз, когда владелец вернётся.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.refresh() }
+        openAccessSettings()
+    }
+
+    func openAccessSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// Доступ могли включить, пока панель открыта: подхватываем сразу и подгружаем значки.
+    func recheckAccess() {
+        let now = MenuBarItemsProvider.isTrusted
+        guard now != trusted else { return }
+        trusted = now
+        if now { refresh() }
     }
 
     func isPinned(_ entry: MenuBarEntry) -> Bool { pinned.contains(entry.id) }
@@ -97,8 +111,10 @@ final class MenuBarListModel: ObservableObject {
         objectWillChange.send()
     }
 
+    var hidingSymbol: String { (hider?.isCollapsed ?? false) ? "eye" : "eye.slash" }
+
     var hidingTitle: String? {
         guard let hider, hider.isEnabled else { return nil }
-        return hider.isCollapsed ? "Показать спрятанные значки" : "Спрятать значки левее черты"
+        return hider.isCollapsed ? "Показать значки" : "Спрятать значки"
     }
 }

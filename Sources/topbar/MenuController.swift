@@ -13,6 +13,10 @@ final class MenuController: NSObject, NSMenuDelegate {
     private let list = MenuBarListController()
     /// Владелец включил или выключил плеер в меню.
     var onPlayerToggle: ((Bool) -> Void)?
+    /// Обновления (nil — не настроены в этой сборке).
+    var updater: AppUpdater?
+    /// Сообщение автору об использовании (nil или недоступно — в этой сборке не используется).
+    var telemetry: Telemetry?
 
     override init() {
         if Settings.hidesMenuBarIcons { MenuBarHider.seedPositions() }
@@ -128,6 +132,22 @@ final class MenuController: NSObject, NSMenuDelegate {
         sound.state = Settings.soundEnabled ? .on : .off
         menu.addItem(sound)
         menu.addItem(.separator())
+        if let telemetry, telemetry.isAvailable {
+            let share = item("Сообщать автору об использовании", #selector(toggleShare))
+            share.state = telemetry.isEnabled ? .on : .off
+            menu.addItem(share)
+            if telemetry.isEnabled {
+                menu.addItem(item("Изменить имя…", #selector(changeName)))
+                menu.addItem(item("Что отправляется…", #selector(showWhatIsSent)))
+            }
+            menu.addItem(.separator())
+        }
+        if let updater {
+            let version = NSMenuItem(title: "topbar \(updater.versionText)", action: nil, keyEquivalent: "")
+            version.isEnabled = false
+            menu.addItem(version)
+            if updater.isConfigured { menu.addItem(item("Проверить обновления…", #selector(checkForUpdates))) }
+        }
         menu.addItem(item("Выйти", #selector(quit), key: "q"))
     }
 
@@ -142,6 +162,10 @@ final class MenuController: NSObject, NSMenuDelegate {
     @objc func toggleSound() { Settings.soundEnabled.toggle() }
     @objc func togglePlayer() { onPlayerToggle?(!Settings.playerEnabled) }
     @objc func setupHint() { showSetupHint() }
+    @objc func checkForUpdates() { updater?.checkForUpdates() }
+    @objc func toggleShare() { guard let t = telemetry else { return }; t.setEnabled(!t.isEnabled) }
+    @objc func changeName() { telemetry?.askName() }
+    @objc func showWhatIsSent() { telemetry?.showWhatIsSent() }
 
     @objc func toggleHiding() {
         Settings.hidesMenuBarIcons.toggle()

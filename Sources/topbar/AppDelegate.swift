@@ -8,6 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: IslandPanelController!
     private var menu: MenuController!
     private let system = SystemState()
+    private let updater = AppUpdater()
+    private let telemetry = Telemetry()
     private var observers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -20,6 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel = IslandPanelController(model: model)
         menu = MenuController()
         menu.onPlayerToggle = { [weak self] on in self?.model.setPlayerEnabled(on) }
+        menu.updater = updater
+        menu.telemetry = telemetry
+        updater.canRestartNow = { [weak self] in self?.model.canRestartNow ?? true }
 
         do { try hub.start() } catch SocketError.alreadyRunning {
             fatal("topbar уже запущен", "Сокет \(Paths.socketPath) слушает другой экземпляр.")
@@ -30,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         model.startPlayerIfEnabled()
+        if !CommandLine.arguments.contains("--skip-onboarding") { updater.start() }
         // Точное определение терминала в Ghostty: узнать (и при необходимости спросить) разрешение «Автоматизация».
         if !CommandLine.arguments.contains("--skip-onboarding") { GhosttyAccess.shared.refresh(ask: true) }
         let center = NotificationCenter.default
@@ -53,9 +59,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.hub.tickNow(); self?.panel.layout() }
         })
 
-        // Первый запуск: хуков ещё нет — предложить поставить.
+        // Первый запуск: спросить согласие на сообщение автору, затем — если хуков ещё нет — предложить поставить.
         DispatchQueue.main.async { [weak self] in
-            guard let self, !CommandLine.arguments.contains("--skip-onboarding"), !HooksController().isInstalledAndHealthy() else { return }
+            guard let self, !CommandLine.arguments.contains("--skip-onboarding") else { return }
+            self.telemetry.askConsentIfNeeded()
+            self.telemetry.pingIfNeeded()
+            guard !HooksController().isInstalledAndHealthy() else { return }
             let alert = NSAlert()
             alert.messageText = "Подключить Claude Code?"
             alert.informativeText = "Чтобы остров видел сессии, нужно вписать хуки в настройки Claude Code. Перед записью вы увидите точную разницу."

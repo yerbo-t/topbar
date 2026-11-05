@@ -7,6 +7,7 @@ final class MenuBarListController {
     let model = MenuBarListModel()
     private let panel: NSPanel
     private var monitor: Any?
+    private var trustTimer: Timer?
     private var anchor = NSRect.zero
 
     init() {
@@ -39,6 +40,20 @@ final class MenuBarListController {
         // Список перерисовывается по мере поступления данных — подгоняем высоту и положение.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.layout() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) { [weak self] in self?.layout() }
+        // Пока доступа нет, раз в секунду проверяем, не включил ли его владелец в настройках.
+        trustTimer?.invalidate()
+        if !model.trusted {
+            let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.model.recheckAccess()
+                    if self.model.trusted { self.trustTimer?.invalidate(); self.trustTimer = nil }
+                    self.layout()
+                }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            trustTimer = timer
+        }
         monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, !self.panel.frame.contains(NSEvent.mouseLocation) else { return }
@@ -48,6 +63,8 @@ final class MenuBarListController {
     }
 
     func hide() {
+        trustTimer?.invalidate()
+        trustTimer = nil
         panel.orderOut(nil)
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
@@ -60,13 +77,14 @@ final class MenuBarListController {
         let width = MenuBarListView.width
         var height: CGFloat = 40 + 52          // шапка и подвал
         if !model.trusted {
-            height += 120
+            height += 190
         } else if model.entries.isEmpty {
             height += 80
         } else {
             height += MenuBarListView.listHeight(rows: model.entries.count)
         }
         if model.message != nil { height += 44 }
+        if model.hidingTitle != nil { height += 52 }       // крупная кнопка «Спрятать / Показать значки»
         let x = min(max(anchor.midX - width / 2, frame.minX + 8), frame.maxX - width - 8)
         let y = anchor.minY - height - 6
         panel.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)

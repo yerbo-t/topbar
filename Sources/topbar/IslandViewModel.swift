@@ -175,6 +175,11 @@ final class IslandViewModel: ObservableObject {
 
     var mode: IslandMode { presenter.mode }
 
+    /// Можно перезапустить приложение (для обновления): нет открытых карточек и сессий, ждущих разрешения.
+    var canRestartNow: Bool {
+        presenter.currentCardId == nil && !presenter.sessions.contains { $0.status == .waitingPermission }
+    }
+
     // MARK: размеры
 
     static let listWidth: CGFloat = 440

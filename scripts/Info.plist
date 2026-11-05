@@ -6,12 +6,20 @@
     <key>CFBundleName</key><string>topbar</string>
     <key>CFBundleDisplayName</key><string>topbar</string>
     <key>CFBundleExecutable</key><string>topbar</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>@VERSION@</string>
+    <key>CFBundleVersion</key><string>@BUILD@</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSAppleEventsUsageDescription</key><string>topbar узнаёт, какой терминал Ghostty в фокусе, и переносит вас к нужной сессии.</string>
+    <key>NSHumanReadableCopyright</key><string>topbar</string>
+    <!-- Автообновление (Sparkle). Подпись обновлений — EdDSA; ключ и адрес ленты подставляет scripts/build-app.sh. -->
+    <key>SUEnableAutomaticChecks</key><true/>
+    <key>SUAutomaticallyUpdate</key><true/>
+    <key>SUScheduledCheckInterval</key><integer>21600</integer>
+    <key>SUEnableSystemProfiling</key><false/>
+@SPARKLE_KEYS@
 </dict>
 </plist>

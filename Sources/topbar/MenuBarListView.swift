@@ -11,6 +11,14 @@ struct MenuBarListView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            if let title = model.hidingTitle {
+                Button { model.toggleHiding() } label: {
+                    Label(title, systemImage: model.hidingSymbol).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(CardButtonStyle(prominent: true))
+                .padding(.horizontal, 18).padding(.bottom, 10)
+                .accessibilityHint("Прячет значки левее черты или возвращает их")
+            }
             if !model.trusted {
                 accessPrompt
             } else if model.entries.isEmpty {
@@ -59,8 +67,15 @@ struct MenuBarListView: View {
             Text("Чтобы увидеть значки других приложений, нужен доступ «Универсальный доступ». Приложение только читает названия значков и нажимает их по вашему клику.")
                 .font(.system(size: 12)).foregroundStyle(Color(white: 0.72))
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Дать доступ") { model.requestAccess() }
-                .buttonStyle(CardButtonStyle(prominent: true)).fixedSize()
+            HStack(spacing: 10) {
+                Button("Дать доступ") { model.requestAccess() }
+                    .buttonStyle(CardButtonStyle(prominent: true)).fixedSize()
+                Button("Открыть настройки") { model.openAccessSettings() }
+                    .buttonStyle(CardButtonStyle(prominent: false)).fixedSize()
+            }
+            Text("Включили, а доступа всё равно нет? После обновления приложения система считает его новым: выделите topbar в списке настроек, нажмите «−» и добавьте заново («+»). Список обновится сам.")
+                .font(.system(size: 11)).foregroundStyle(Color(white: 0.55))
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 18).padding(.bottom, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -73,9 +88,6 @@ struct MenuBarListView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 16) {
-                if let title = model.hidingTitle {
-                    Button(title) { model.toggleHiding() }
-                }
                 Spacer(minLength: 0)
                 Button("Закрыть") { model.onClose?() }
             }
