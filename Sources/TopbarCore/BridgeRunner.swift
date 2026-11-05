@@ -40,6 +40,8 @@ public enum BridgeRunner {
             pid: claudePid,
             processStartedAt: claudePid > 0 ? ProcessProbe.startTime(pid: claudePid) : nil,
             termProgram: environment["TERM_PROGRAM"],
+            hostBundleId: environment["__CFBundleIdentifier"]
+                ?? (environment["CLAUDE_CODE_ENTRYPOINT"] == "claude-vscode" ? "com.microsoft.VSCode" : nil),
             projectDir: environment["CLAUDE_PROJECT_DIR"],
             unattended: unattended,
             tty: claudePid > 0 ? ProcessProbe.ttyName(of: claudePid) : nil,

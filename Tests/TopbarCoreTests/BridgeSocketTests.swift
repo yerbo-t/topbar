@@ -156,6 +156,12 @@ final class BridgeSocketTests: XCTestCase {
         XCTAssertNil(msg?.processStartedAt)
     }
 
+    func testHostBundleIdFromEnvironmentOrVSCodeExtensionEntrypoint() {
+        XCTAssertEqual(receive(hookJSON("Stop"), env: ["__CFBundleIdentifier": "com.microsoft.VSCode"])?.hostBundleId, "com.microsoft.VSCode")
+        XCTAssertEqual(receive(hookJSON("Stop"), env: ["CLAUDE_CODE_ENTRYPOINT": "claude-vscode"])?.hostBundleId, "com.microsoft.VSCode")
+        XCTAssertNil(receive(hookJSON("Stop"))?.hostBundleId)
+    }
+
     func testWindowHintsAreCollectedFromEnvironment() {
         let msg = receive(hookJSON("Stop"), env: ["GHOSTTY_RESOURCES_DIR": "/x", "VSCODE_PID": "7", "PATH": "/bin", "TERM_SESSION_ID": "w0t0p0"])
         XCTAssertEqual(msg?.hints, ["GHOSTTY_RESOURCES_DIR": "/x", "VSCODE_PID": "7", "TERM_SESSION_ID": "w0t0p0"])

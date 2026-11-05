@@ -8,6 +8,9 @@ public struct BridgeMessage: Codable, Equatable, Sendable {
     public var pid: Int32
     public var processStartedAt: Double?
     public var termProgram: String?
+    /// Приложение, в котором запущена сессия (`__CFBundleIdentifier` окружения): у расширения Claude Code в VS Code
+    /// нет ни терминала, ни `TERM_PROGRAM`, зато есть это.
+    public var hostBundleId: String?
     public var projectDir: String?
     /// Сессия без терминала (`claude -p`, SDK): карточки ей не нужны.
     public var unattended: Bool
@@ -22,6 +25,7 @@ public struct BridgeMessage: Codable, Equatable, Sendable {
         pid: Int32,
         processStartedAt: Double? = nil,
         termProgram: String? = nil,
+        hostBundleId: String? = nil,
         projectDir: String? = nil,
         unattended: Bool = false,
         tty: String? = nil,
@@ -32,6 +36,7 @@ public struct BridgeMessage: Codable, Equatable, Sendable {
         self.pid = pid
         self.processStartedAt = processStartedAt
         self.termProgram = termProgram
+        self.hostBundleId = hostBundleId
         self.projectDir = projectDir
         self.unattended = unattended
         self.tty = tty

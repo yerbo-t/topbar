@@ -58,7 +58,7 @@ public struct SessionStore {
 
         if msg.pid > 0 { s.pid = msg.pid }
         if let started = msg.processStartedAt { s.processStartedAt = started }
-        if let host = Self.hostName(msg.termProgram) { s.hostApp = host }
+        if let host = Self.hostName(msg.termProgram, bundleId: msg.hostBundleId) { s.hostApp = host }
         if let tty = msg.tty { s.tty = tty }
         if !msg.hints.isEmpty, s.hints != msg.hints { s.hints = msg.hints }
         if let mode = ev.permissionMode { s.permissionMode = mode }
@@ -274,12 +274,18 @@ public struct SessionStore {
         return result
     }
 
-    public static func hostName(_ termProgram: String?) -> String? {
+    /// Приложение-хост по `TERM_PROGRAM`, а если его нет (расширение Claude Code в VS Code) — по идентификатору приложения.
+    public static func hostName(_ termProgram: String?, bundleId: String? = nil) -> String? {
         switch termProgram {
         case "ghostty": return "Ghostty"
         case "vscode": return "VS Code"
         case let other?: return other
-        case nil: return nil
+        case nil: break
+        }
+        switch bundleId {
+        case "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders": return "VS Code"
+        case "com.mitchellh.ghostty": return "Ghostty"
+        default: return nil
         }
     }
 

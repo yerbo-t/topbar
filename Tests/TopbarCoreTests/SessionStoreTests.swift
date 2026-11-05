@@ -265,4 +265,16 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(status(), .waitingPermission)
         XCTAssertFalse(store.sessions["s1"]!.queue[0].cardable)
     }
+
+    // MARK: хост сессии
+
+    func testHostComesFromBundleIdWhenThereIsNoTermProgram() {
+        var m = Fx.msg("UserPromptSubmit", term: nil)
+        m.hostBundleId = "com.microsoft.VSCode"
+        store.apply(m, now: now)
+        XCTAssertEqual(store.sessions["s1"]?.hostApp, "VS Code", "расширение VS Code: нет TERM_PROGRAM, есть приложение")
+        XCTAssertEqual(SessionStore.hostName(nil, bundleId: "com.mitchellh.ghostty"), "Ghostty")
+        XCTAssertNil(SessionStore.hostName(nil, bundleId: "com.apple.Terminal"))
+        XCTAssertEqual(SessionStore.hostName("vscode", bundleId: nil), "VS Code")
+    }
 }

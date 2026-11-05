@@ -174,7 +174,7 @@ final class IslandViewModel: ObservableObject {
         presenter = next
         recomputeLayout()
         if CommandLine.arguments.contains("--debug") {
-            FileHandle.standardError.write(Data("[island] mode=\(next.mode) summary=\"\(next.summaryText)\" sessions=\(next.sessions.map { "\($0.project):\($0.status)" })\n".utf8))
+            FileHandle.standardError.write(Data("[island] mode=\(next.mode) summary=\"\(next.summaryText)\" sessions=\(next.sessions.map { "\($0.project):\($0.status):\($0.hostApp ?? "-")" })\n".utf8))
         }
         // Вид перерисовываем, только если изменилось то, что на нём видно в текущем режиме.
         if visibleKey(next, titles: titles) != before {
