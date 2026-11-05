@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { basicAuth } from "hono/basic-auth";
 import { bodyLimit } from "hono/body-limit";
+import { getConnInfo } from "@hono/node-server/conninfo";
+import type { Context } from "hono";
 import type { Ping, Install, Store } from "./store.ts";
 
 const UUID = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/;
@@ -59,22 +61,51 @@ export interface Options {
   adminPassword: string;
   /** Записей с одного адреса в минуту. */
   rateLimitPerMinute?: number;
+  /** Записей в минуту со всех адресов вместе (защита от «размножения» адресов). */
+  globalPerMinute?: number;
+  /** Сколько установок хранить; после этого принимаются только записи от уже известных (ограничивает рост базы). */
+  maxInstalls?: number;
+  /** Сколько прокси стоит перед службой (Coolify/Traefik — 1): адрес клиента берётся из X-Forwarded-For
+   *  с конца, потому что левая часть заголовка подделывается клиентом. 0 — заголовку не верить. */
+  trustedProxyHops?: number;
+}
+
+/** Адрес клиента для ограничения частоты: последний, дописанный доверенным прокси, а не первый, присланный клиентом. */
+export function clientIp(c: Context, hops: number): string {
+  const forwarded = c.req.header("x-forwarded-for");
+  if (hops > 0 && forwarded) {
+    const parts = forwarded.split(",").map((part) => part.trim()).filter(Boolean);
+    const ip = parts[parts.length - hops];
+    if (ip) return ip;
+  }
+  try {
+    return getConnInfo(c).remote.address ?? "unknown";
+  } catch {
+    return "unknown";
+  }
 }
 
 export function createApp(store: Store, options: Options): Hono {
   const app = new Hono();
   const hits = new Map<string, number[]>();
   const limit = options.rateLimitPerMinute ?? 30;
+  const globalLimit = options.globalPerMinute ?? 600;
+  const maxInstalls = options.maxInstalls ?? 5000;
+  const hops = options.trustedProxyHops ?? 1;
+  let global: number[] = [];
 
   app.get("/health", (c) => c.json({ ok: true }));
 
   app.post("/api/ping", bodyLimit({ maxSize: 4 * 1024, onError: (c) => c.json({ error: "too large" }, 413) }), async (c) => {
-    // За прокси адрес приходит в X-Forwarded-For; он нужен только для ограничения частоты и нигде не сохраняется.
-    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+    // Адрес нужен только для ограничения частоты и нигде не сохраняется.
+    const ip = clientIp(c, hops);
     const now = Date.now();
+    global = global.filter((t) => now - t < 60_000);
+    if (global.length >= globalLimit) return c.json({ error: "slow down" }, 429);
     const recent = (hits.get(ip) ?? []).filter((t) => now - t < 60_000);
     if (recent.length >= limit) return c.json({ error: "slow down" }, 429);
     recent.push(now);
+    global.push(now);
     hits.set(ip, recent);
     if (hits.size > 5000) hits.clear();
 
@@ -86,6 +117,8 @@ export function createApp(store: Store, options: Options): Hono {
     }
     const ping = parsePing(body);
     if (!ping) return c.json({ error: "bad ping" }, 400);
+    // Новых установок принимаем не больше предела: иначе любой мог бы бесконечно раздувать базу выдуманными номерами.
+    if (!store.has(ping.id) && store.count() >= maxInstalls) return c.json({ error: "full" }, 503);
     store.record(ping);
     return c.json({ ok: true });
   });

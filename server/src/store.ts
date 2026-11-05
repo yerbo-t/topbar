@@ -61,6 +61,10 @@ export class Store {
     return this.db.prepare("SELECT * FROM installs ORDER BY last_seen DESC").all() as unknown as Install[];
   }
 
+  has(id: string): boolean {
+    return this.db.prepare("SELECT 1 FROM installs WHERE id = ?").get(id) !== undefined;
+  }
+
   count(): number {
     return (this.db.prepare("SELECT COUNT(*) AS n FROM installs").get() as { n: number }).n;
   }

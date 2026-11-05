@@ -64,3 +64,25 @@ test("разбор записи: обрезка и регистр номера",
   assert.equal(ping?.event, "launch");
   assert.ok(page([]).includes("Пока никого"));
 });
+
+test("подделанная левая часть X-Forwarded-For не обходит ограничение", async () => {
+  const { post } = make(2);
+  // Доверенный прокси дописывает настоящий адрес справа; клиент может подставить что угодно слева.
+  assert.equal((await post(good, { "x-forwarded-for": "1.1.1.1, 7.7.7.7" })).status, 200);
+  assert.equal((await post(good, { "x-forwarded-for": "2.2.2.2, 7.7.7.7" })).status, 200);
+  assert.equal((await post(good, { "x-forwarded-for": "3.3.3.3, 7.7.7.7" })).status, 429, "считается по правому адресу");
+});
+
+test("общий предел на минуту и предел числа установок", async () => {
+  const store = new Store(":memory:");
+  const app = createApp(store, { adminPassword: "correct-horse-battery", globalPerMinute: 4, maxInstalls: 2 });
+  const send = (id: string, ip: string) =>
+    app.request("/api/ping", { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": ip }, body: JSON.stringify({ ...good, id }) });
+  const id = (n: number) => `7C1B2A3D-1111-4222-8333-44445555000${n}`;
+  assert.equal((await send(id(1), "1.1.1.1")).status, 200);
+  assert.equal((await send(id(2), "2.2.2.2")).status, 200);
+  assert.equal((await send(id(3), "3.3.3.3")).status, 503, "третья новая установка — предел базы");
+  assert.equal((await send(id(1), "4.4.4.4")).status, 200, "известная обновляется и после предела");
+  assert.equal((await send(id(1), "5.5.5.5")).status, 429, "общий предел в минуту: адреса не помогают");
+  assert.equal(store.count(), 2);
+});
