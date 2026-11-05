@@ -2,23 +2,85 @@ import AppKit
 import ServiceManagement
 import TopbarCore
 
-/// Иконка в строке меню: единственный вход в управление приложением.
+/// Иконка в строке меню: вход в управление приложением. Пока включено сворачивание значков, левый клик по ней прячет и
+/// показывает значки других приложений, а меню открывается правым кликом (или клик с Control).
 @MainActor
 final class MenuController: NSObject, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private let hooks = HooksController()
+    private let hider = MenuBarHider()
 
     override init() {
         super.init()
-        if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "capsule.portrait.tophalf.filled", accessibilityDescription: "topbar")
-                ?? NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "topbar")
-            button.image?.isTemplate = true
-            button.toolTip = "topbar — сессии Claude Code"
-        }
         menu.delegate = self
-        statusItem.menu = menu
+        if let button = statusItem.button {
+            button.target = self
+            button.action = #selector(statusClicked)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+        hider.onStateChange = { [weak self] in self?.updateIcon() }
+        hider.onSafetyRevert = { [weak self] in self?.showSafetyAlert() }
+        if Settings.hidesMenuBarIcons { hider.enable(control: statusItem) }
+        updateIcon()
+        if CommandLine.arguments.contains("--debug-hider-selftest") { hider.selfTest() }
+    }
+
+    // MARK: значок и клики
+
+    private func updateIcon() {
+        guard let button = statusItem.button else { return }
+        let name: String
+        if !hider.isEnabled {
+            name = "capsule.portrait.tophalf.filled"
+            button.toolTip = "topbar — сессии Claude Code"
+        } else if hider.isCollapsed {
+            name = "chevron.left"
+            button.toolTip = "Показать спрятанные значки (правый клик — меню topbar)"
+        } else {
+            name = "chevron.right"
+            button.toolTip = "Спрятать значки (правый клик — меню topbar)"
+        }
+        let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+        button.image = (NSImage(systemSymbolName: name, accessibilityDescription: "topbar")
+            ?? NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "topbar"))?.withSymbolConfiguration(config)
+        button.image?.isTemplate = true
+    }
+
+    @objc private func statusClicked() {
+        let event = NSApp.currentEvent
+        let wantsMenu = !hider.isEnabled || event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true
+        if wantsMenu {
+            statusItem.menu = menu
+            statusItem.button?.performClick(nil)
+            statusItem.menu = nil      // иначе левый клик снова открывал бы меню
+            return
+        }
+        if hider.toggle() == .nothingToHide { showSetupHint() }
+    }
+
+    private func showSetupHint() {
+        let alert = NSAlert()
+        alert.messageText = "Пока нечего прятать"
+        alert.informativeText = """
+            Левее черты «│» нет значков. Перетащите с зажатым ⌘ те значки, которые хотите прятать, левее черты. \
+            Значок «›» и всё, что должно оставаться на виду, держите правее.
+
+            Дальше один клик по «›» прячет значки, второй возвращает; спрятанное закрывается само через \(Int(MenuBarHider.autoCollapseDelay)) с.
+            Меню приложения — правый клик по «›».
+            """
+        alert.addButton(withTitle: "Понятно")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
+    private func showSafetyAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Значки возвращены на место"
+        alert.informativeText = "Значок «›» оказался левее черты «│» и спрятался бы вместе с остальными. Перетащите его с зажатым ⌘ правее черты."
+        alert.addButton(withTitle: "Понятно")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -34,6 +96,11 @@ final class MenuController: NSObject, NSMenuDelegate {
             : "Ghostty: определяю по приложению (нет доступа «Автоматизация»)", action: nil, keyEquivalent: "")
         ghostty.isEnabled = false
         menu.addItem(ghostty)
+        menu.addItem(.separator())
+        let hiding = item("Сворачивать значки меню", #selector(toggleHiding))
+        hiding.state = hider.isEnabled ? .on : .off
+        menu.addItem(hiding)
+        if hider.isEnabled { menu.addItem(item("Как настроить сворачивание…", #selector(setupHint))) }
         menu.addItem(.separator())
         let login = item("Запускать при входе", #selector(toggleLogin))
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -54,6 +121,13 @@ final class MenuController: NSObject, NSMenuDelegate {
     @objc func installHooks() { hooks.install() }
     @objc func removeHooks() { hooks.remove() }
     @objc func toggleSound() { Settings.soundEnabled.toggle() }
+    @objc func setupHint() { showSetupHint() }
+
+    @objc func toggleHiding() {
+        Settings.hidesMenuBarIcons.toggle()
+        if Settings.hidesMenuBarIcons { hider.enable(control: statusItem) } else { hider.disable() }
+        updateIcon()
+    }
     @objc func quit() { NSApp.terminate(nil) }
 
     @objc func toggleLogin() {
