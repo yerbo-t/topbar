@@ -1,6 +1,6 @@
 import Foundation
 
-public enum IslandMode: Equatable {
+public enum IslandMode: Equatable, Hashable {
     case hidden
     case collapsed
     case list

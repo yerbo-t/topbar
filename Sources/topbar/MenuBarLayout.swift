@@ -24,16 +24,24 @@ enum MenuBarLayout {
         return frames
     }
 
-    /// Свободное место справа от выреза до первого значка (в пунктах); nil — значков нет вовсе (места сколько угодно).
-    /// Значки, лежащие в зоне выреза, не считаются: система их всё равно не показывает.
-    static func freeSpaceRightOfNotch(on screen: NSScreen, notchWidth: CGFloat) -> CGFloat? {
-        guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else { return nil }
-        let display = CGDisplayBounds(id)
-        let notchRight = display.midX + notchWidth / 2
-        let starts = statusItemFrames(on: screen)
+    enum FreeSpace: Equatable {
+        case unknown          // строка меню сейчас не видна (полноэкранное окно) — значков не разглядеть
+        case unlimited        // строка видна, значков справа от выреза нет
+        case points(CGFloat)  // место до первого значка
+    }
+
+    /// Свободное место справа от выреза до первого значка. Значки, лежащие в зоне выреза, не считаются: система их всё
+    /// равно не показывает.
+    static func freeSpaceRightOfNotch(on screen: NSScreen, notchWidth: CGFloat) -> FreeSpace {
+        guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else { return .unknown }
+        let frames = statusItemFrames(on: screen)
+        guard !frames.isEmpty else { return .unknown }
+        let notchRight = CGDisplayBounds(id).midX + notchWidth / 2
+        let starts = frames
             .filter { $0.maxX > notchRight + 1 && $0.width > 0 }
             .map(\.minX)
             .filter { $0 >= notchRight - 1 }
-        return starts.min().map { max(0, $0 - notchRight) }
+        guard let first = starts.min() else { return .unlimited }
+        return .points(max(0, first - notchRight))
     }
 }

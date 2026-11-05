@@ -2,11 +2,21 @@ import AppKit
 import SwiftUI
 import TopbarCore
 
+/// Где и какого размера чёрная фигура острова внутри окна (окно на время перехода больше фигуры).
+struct ShapeRect: Equatable {
+    var x: CGFloat
+    var width: CGFloat
+    var height: CGFloat
+    var radius: CGFloat
+}
+
 /// Связывает хаб сессий с видом: хранит состояние острова и принимает действия владельца.
 @MainActor
 final class IslandViewModel: ObservableObject {
     private(set) var presenter = IslandPresenter()
     @Published private(set) var titles: [String: String] = [:]
+    /// Фигура острова: меняется пружиной, пока окно больше неё (см. `IslandPanelController.layout`).
+    @Published var shape = ShapeRect(x: 0, width: 0, height: 0, radius: 11)
     /// Размеры считаются один раз на изменение (замер текста не должен повторяться при каждой перерисовке).
     private(set) var size: CGSize = .zero
     /// Раскладка «ушей» свёрнутого острова: подстраивается под свободное место до значков справа от выреза.
@@ -90,10 +100,16 @@ final class IslandViewModel: ObservableObject {
         guard let geometry else { return false }
         if !force, Date().timeIntervalSince(spaceCheckedAt) < 0.5 { return false }
         spaceCheckedAt = Date()
-        var free = MenuBarLayout.freeSpaceRightOfNotch(on: geometry.screen, notchWidth: geometry.notchWidth)
+        var sample = MenuBarLayout.freeSpaceRightOfNotch(on: geometry.screen, notchWidth: geometry.notchWidth)
         // Отладка: подставить свободное место (`--debug-free-right 36`), чтобы проверить виды ушей без значков.
         if let i = CommandLine.arguments.firstIndex(of: "--debug-free-right"), i + 1 < CommandLine.arguments.count,
-           let value = Double(CommandLine.arguments[i + 1]) { free = CGFloat(value) }
+           let value = Double(CommandLine.arguments[i + 1]) { sample = .points(CGFloat(value)) }
+        let free: CGFloat?
+        switch sample {
+        case .unknown: return false           // строка спрятана: остаёмся при последнем известном месте
+        case .unlimited: free = nil
+        case .points(let value): free = value
+        }
         let changed: Bool
         switch (free, availableRight) {
         case (nil, nil): changed = false
@@ -108,6 +124,9 @@ final class IslandViewModel: ObservableObject {
     var centerShift: CGFloat {
         presenter.mode == .collapsed ? (ears.rightWidth - ears.leftWidth) / 2 : 0
     }
+
+    /// Радиус нижних углов: у свёрнутого острова — как у выреза, у раскрытого — мягче.
+    var cornerRadius: CGFloat { presenter.mode == .collapsed ? 11 : 22 }
 
     private func computeSize() -> CGSize {
         let notchH = geometry?.notchHeight ?? 32
@@ -203,7 +222,10 @@ final class IslandViewModel: ObservableObject {
         }
         // Вид перерисовываем, только если изменилось то, что на нём видно в текущем режиме.
         if visibleKey(next, titles: titles) != before {
-            objectWillChange.send()
+            // Смена содержимого (свёрнуто → список → карточка) плавно растворяется; фигуру двигает панель.
+            withAnimation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .easeOut(duration: 0.18)) {
+                objectWillChange.send()
+            }
             onLayoutChange?()
         }
     }

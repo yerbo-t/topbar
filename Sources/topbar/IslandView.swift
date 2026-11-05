@@ -68,15 +68,24 @@ struct IslandView: View {
     @ObservedObject var model: IslandViewModel
 
     var body: some View {
-        let size = model.size
+        let shape = model.shape
+        let outline = UnevenRoundedRectangle(bottomLeadingRadius: shape.radius, bottomTrailingRadius: shape.radius)
         ZStack(alignment: .top) {
-            UnevenRoundedRectangle(bottomLeadingRadius: 20, bottomTrailingRadius: 20)
-                .fill(Color.black)
+            outline.fill(Color.black)
+            if model.mode != .collapsed {
+                // Тонкая кромка только по бокам и снизу: сверху остров должен сливаться с вырезом.
+                outline.strokeBorder(LinearGradient(colors: [.clear, .white.opacity(0.10)], startPoint: .top, endPoint: .bottom), lineWidth: 1)
+            }
             content
+                .id(model.mode)
+                .transition(.opacity)
         }
-        .frame(width: size.width, height: size.height, alignment: .top)
+        .frame(width: shape.width, height: shape.height, alignment: .top)
+        .clipShape(outline)
+        .offset(x: shape.x)
         .foregroundStyle(.white)
         .onHover { model.hover($0) }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder private var content: some View {

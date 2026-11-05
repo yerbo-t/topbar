@@ -44,29 +44,76 @@ final class IslandPanelController {
 
     private var spaceTimer: Timer?
 
-    /// Пересчитать окно по текущему состоянию.
+    private var settleWork: DispatchWorkItem?
+    private let spring = Animation.spring(response: 0.36, dampingFraction: 0.84)
+
+    /// Пересчитать окно по текущему состоянию. Остров «вырастает из выреза»: окно на время перехода покрывает и старую, и новую
+    /// фигуру, а саму фигуру двигает пружина SwiftUI; когда она успокоилась, окно сжимается до итогового размера (иначе прозрачная
+    /// часть окна перехватывала бы клики).
     func layout() {
         model.geometry = NotchGeometry.find()
         if model.mode == .collapsed { model.refreshMenuBarSpace() }
         model.recomputeLayout()
+        settleWork?.cancel()
         guard let geometry = model.geometry, model.mode != .hidden else {
-            panel.orderOut(nil)
+            hide()
             return
         }
         let size = model.size
         let screen = geometry.screen.frame
-        let frame = NSRect(x: screen.midX + model.centerShift - size.width / 2, y: screen.maxY - size.height, width: size.width, height: size.height)
+        let target = NSRect(x: screen.midX + model.centerShift - size.width / 2, y: screen.maxY - size.height, width: size.width, height: size.height)
+        let shapeTarget = ShapeRect(x: 0, width: size.width, height: size.height, radius: model.cornerRadius)
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
         if !panel.isVisible {
-            panel.setFrame(frame, display: true)
+            // Первое появление: из выреза в нужный размер.
+            panel.setFrame(target, display: true)
+            let notch = ShapeRect(x: (size.width - geometry.notchWidth) / 2, width: geometry.notchWidth, height: geometry.notchHeight, radius: 11)
+            model.shape = reduceMotion ? shapeTarget : notch
             panel.orderFrontRegardless()
-        } else if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            panel.setFrame(frame, display: true)
-        } else {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.2
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                panel.animator().setFrame(frame, display: true)
+            if !reduceMotion {
+                DispatchQueue.main.async { [self] in withAnimation(spring) { model.shape = shapeTarget } }
             }
+            return
         }
+
+        let old = panel.frame
+        if reduceMotion || (old.size == target.size && old.origin == target.origin) {
+            panel.setFrame(target, display: true)
+            model.shape = shapeTarget
+            return
+        }
+        // Окно = объединение, фигура пока на прежнем месте — прыжка нет; следующим проходом пружина ведёт её к новой.
+        let union = old.union(target)
+        let oldShape = model.shape
+        model.shape = ShapeRect(x: old.minX - union.minX + oldShape.x, width: oldShape.width, height: oldShape.height, radius: oldShape.radius)
+        panel.setFrame(union, display: true)
+        let moved = ShapeRect(x: target.minX - union.minX, width: target.width, height: target.height, radius: model.cornerRadius)
+        DispatchQueue.main.async { [self] in withAnimation(spring) { model.shape = moved } }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.panel.setFrame(target, display: true)
+            self.model.shape = shapeTarget      // та же картинка: окно сдвинулось ровно на смещение фигуры
+        }
+        settleWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    /// Убрать остров: фигура сжимается в вырез, потом окно скрывается.
+    private func hide() {
+        guard panel.isVisible else { return }
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || model.geometry == nil {
+            panel.orderOut(nil)
+            return
+        }
+        let notchWidth = model.geometry?.notchWidth ?? 200
+        let notchHeight = model.geometry?.notchHeight ?? 32
+        let current = model.shape
+        withAnimation(spring) {
+            model.shape = ShapeRect(x: current.x + (current.width - notchWidth) / 2, width: notchWidth, height: notchHeight, radius: 11)
+        }
+        let work = DispatchWorkItem { [weak self] in self?.panel.orderOut(nil) }
+        settleWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 }

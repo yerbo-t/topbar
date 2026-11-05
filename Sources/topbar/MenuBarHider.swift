@@ -8,17 +8,51 @@ import AppKit
 /// узнавать про чужие значки, поэтому не нужны и разрешения.
 @MainActor
 final class MenuBarHider {
-    enum Toggle { case changed, nothingToHide }
+    enum Toggle { case changed, needsSetup }
 
     /// Длина разделителя в свёрнутом виде. Система сама обрезает её (на этом Mac — до ~5000), но и этого хватает.
     static let hiddenLength: CGFloat = 10000
     /// Через сколько секунд развёрнутые значки прячутся сами.
     static let autoCollapseDelay: TimeInterval = 10
 
+    /// Имена для сохранения положения значков. Пока владелец их не двигал, ставим оба у правого края (рядом с «Пунктом
+    /// управления»): на Mac с вырезом слева места нет, система роняет самые левые значки, а новые по умолчанию встают
+    /// именно слева — и управляющий значок просто не был бы виден.
+    static let controlName = "topbar-control"
+    static let separatorName = "topbar-separator"
+
+    /// Задать начальные положения, если владелец ещё не двигал значки. Вызывать до создания значков.
+    static func seedPositions() {
+        let defaults = UserDefaults.standard
+        func seed(_ name: String, _ value: Double) {
+            let key = positionKey(name)
+            if defaults.object(forKey: key) == nil { defaults.set(value, forKey: key) }
+        }
+        seed(controlName, seedControl)
+        seed(separatorName, seedSeparator)
+    }
+
+    private static let seedControl = 40.0
+    private static let seedSeparator = 41.0   // чуть левее управляющего значка (система поправит до ближайшего допустимого)
+    private static func positionKey(_ name: String) -> String { "NSStatusItem Preferred Position \(name)" }
+
+    /// Сколько значков справа от разделителя при первом запуске (системные «Пункт управления» и часы). Положение, которое
+    /// система сама записывает вместо начального, для этого не годится — она переписывает его сразу после раскладки.
+    private static let baselineKey = "menuBarBaselineRight"
+
+    /// Владелец передвинул разделитель: справа от него появились значки сверх тех, что были при первом запуске.
+    /// До этого «свернуть» спрятало бы вообще всё, кроме системных значков. Нет данных (строка меню спрятана) — считаем, что нет.
+    var isArranged: Bool {
+        guard let baseline = UserDefaults.standard.object(forKey: Self.baselineKey) as? Int,
+              let current = itemsRightOfSeparator() else { return false }
+        return current > baseline
+    }
+
     private var separator: NSStatusItem?
     private weak var control: NSStatusItem?
     private var autoCollapse: DispatchWorkItem?
     private(set) var isCollapsed = false
+    private var startedCollapsedOnce = false
 
     /// Состояние поменялось (обновить вид управляющего значка).
     var onStateChange: (() -> Void)?
@@ -31,15 +65,24 @@ final class MenuBarHider {
         guard separator == nil else { return }
         self.control = control
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.autosaveName = "topbar-separator"   // положение, выбранное владельцем, сохраняется
+        item.autosaveName = Self.separatorName   // положение, выбранное владельцем, сохраняется
         item.button?.toolTip = "Всё левее этой черты прячется кнопкой topbar (перетаскивайте значки с зажатым ⌘)"
         separator = item
         isCollapsed = false
         applyAppearance()
-        // Стартуем свёрнутыми: сначала даём системе разложить значки, потом проверяем безопасность.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-            guard let self, self.separator != nil, !self.isCollapsed else { return }
-            if self.itemsToHide() > 0 { self.setCollapsed(true) }
+        // Даём системе разложить значки, запоминаем исходное число значков справа (первый запуск) и, если владелец уже расставил
+        // значки, стартуем свёрнутыми. Строка меню может быть спрятана (полный экран) — тогда повторяем позже.
+        for delay in [0.6, 10.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, self.separator != nil, !self.isCollapsed else { return }
+                if UserDefaults.standard.object(forKey: Self.baselineKey) == nil, let count = self.itemsRightOfSeparator() {
+                    UserDefaults.standard.set(count, forKey: Self.baselineKey)
+                }
+                if delay == 0.6 || !self.startedCollapsedOnce, self.isArranged, self.itemsToHide() > 0 {
+                    self.startedCollapsedOnce = true
+                    self.setCollapsed(true)
+                }
+            }
         }
     }
 
@@ -51,14 +94,15 @@ final class MenuBarHider {
         onStateChange?()
     }
 
-    /// Клик по управляющему значку. `.nothingToHide` — левее разделителя нет значков, показываем подсказку, как настроить.
+    /// Клик по управляющему значку. `.needsSetup` — значки ещё не расставлены (или левее разделителя пусто):
+    /// ничего не прячем, показываем подсказку, как настроить.
     func toggle() -> Toggle {
         guard isEnabled else { return .changed }
         if isCollapsed {
             setCollapsed(false)
             return .changed
         }
-        guard itemsToHide() > 0 else { return .nothingToHide }
+        guard isArranged, itemsToHide() > 0 else { return .needsSetup }
         setCollapsed(true)
         return .changed
     }
@@ -155,6 +199,14 @@ final class MenuBarHider {
         image.isTemplate = true
         return image
     }()
+
+    /// Сколько значков (без управляющего) лежит правее разделителя; nil — строка меню не видна. Только в развёрнутом виде.
+    private func itemsRightOfSeparator() -> Int? {
+        guard let window = separator?.button?.window, let screen = window.screen ?? NSScreen.main else { return nil }
+        let frames = MenuBarLayout.statusItemFrames(on: screen)
+        guard !frames.isEmpty else { return nil }
+        return max(0, frames.filter { $0.minX >= window.frame.maxX - 1 }.count - 1)
+    }
 
     /// Сколько значков лежит левее разделителя (в видимой части строки). Считается только в развёрнутом виде.
     private func itemsToHide() -> Int {

@@ -6,12 +6,15 @@ import TopbarCore
 /// показывает значки других приложений, а меню открывается правым кликом (или клик с Control).
 @MainActor
 final class MenuController: NSObject, NSMenuDelegate {
-    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let statusItem: NSStatusItem
     private let menu = NSMenu()
     private let hooks = HooksController()
     private let hider = MenuBarHider()
 
     override init() {
+        if Settings.hidesMenuBarIcons { MenuBarHider.seedPositions() }
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem.autosaveName = MenuBarHider.controlName
         super.init()
         menu.delegate = self
         if let button = statusItem.button {
@@ -56,17 +59,18 @@ final class MenuController: NSObject, NSMenuDelegate {
             statusItem.menu = nil      // иначе левый клик снова открывал бы меню
             return
         }
-        if hider.toggle() == .nothingToHide { showSetupHint() }
+        if hider.toggle() == .needsSetup { showSetupHint() }
     }
 
     private func showSetupHint() {
         let alert = NSAlert()
-        alert.messageText = "Пока нечего прятать"
+        alert.messageText = "Расставьте значки один раз"
         alert.informativeText = """
-            Левее черты «│» нет значков. Перетащите с зажатым ⌘ те значки, которые хотите прятать, левее черты. \
-            Значок «›» и всё, что должно оставаться на виду, держите правее.
+            Всё, что стоит левее черты «│», кнопка «\(hider.isCollapsed ? "‹" : "›")» прячет. Сейчас черта стоит у самого правого края, поэтому левее неё все значки.
 
-            Дальше один клик по «›» прячет значки, второй возвращает; спрятанное закрывается само через \(Int(MenuBarHider.autoCollapseDelay)) с.
+            Зажмите ⌘ и перетащите черту «│» влево — так, чтобы слева от неё остались только те значки, которые хотите прятать. \
+            Дальше клик по «›» прячет их, второй клик возвращает; спрятанное закрывается само через \(Int(MenuBarHider.autoCollapseDelay)) с.
+
             Меню приложения — правый клик по «›».
             """
         alert.addButton(withTitle: "Понятно")
