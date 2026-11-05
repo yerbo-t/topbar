@@ -3,8 +3,9 @@
 # appcast.xml (лента обновлений с подписью EdDSA) и release-notes.html. НИЧЕГО НЕ ПУБЛИКУЕТ — выкладка отдельным шагом.
 #
 # Переменные окружения:
-#   TOPBAR_FEED_URL       куда будет выложен appcast.xml (адрес вшивается в приложение)          — обязательно
-#   TOPBAR_DOWNLOAD_BASE  каталог, откуда скачиваются zip и dmg (без завершающего «/»)         — обязательно
+#   TOPBAR_GITHUB_REPO    репозиторий релизов (по умолчанию yerbo-t/topbar)
+#   TOPBAR_FEED_URL       адрес appcast.xml, вшивается в приложение (по умолчанию — последний релиз GitHub)
+#   TOPBAR_DOWNLOAD_BASE  каталог, откуда скачиваются zip и dmg, без завершающего «/» (по умолчанию — релиз vВЕРСИЯ на GitHub)
 #   TOPBAR_SERVER_URL     адрес службы аналитики и отзывов (необязательно; см. build-app.sh)
 #   TOPBAR_VERSION, TOPBAR_BUILD — версия и номер сборки (по умолчанию VERSION и время сборки)
 #   TOPBAR_ALLOW_HTTP=1   разрешить http (только проверка обновлений на своём Mac)
@@ -12,9 +13,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-: "${TOPBAR_FEED_URL:?задайте TOPBAR_FEED_URL — адрес appcast.xml}"
-: "${TOPBAR_DOWNLOAD_BASE:?задайте TOPBAR_DOWNLOAD_BASE — откуда скачиваются файлы}"
 VERSION="${TOPBAR_VERSION:-$(tr -d '[:space:]' < VERSION)}"
+# По умолчанию — релизы GitHub: постоянный адрес ленты (последний релиз) и версионный адрес архива.
+REPO="${TOPBAR_GITHUB_REPO:-yerbo-t/topbar}"
+TOPBAR_FEED_URL="${TOPBAR_FEED_URL:-https://github.com/$REPO/releases/latest/download/appcast.xml}"
+TOPBAR_DOWNLOAD_BASE="${TOPBAR_DOWNLOAD_BASE:-https://github.com/$REPO/releases/download/v$VERSION}"
+export TOPBAR_FEED_URL
 BUILD="${TOPBAR_BUILD:-$(date +%Y%m%d%H%M)}"
 export TOPBAR_VERSION="$VERSION" TOPBAR_BUILD="$BUILD"
 SIGN_DIR="$HOME/Library/Application Support/topbar-signing"
@@ -38,6 +42,7 @@ cp -R build/topbar.app "$STAGE/topbar.app"
 ln -s /Applications "$STAGE/Applications"
 cp docs/dmg-readme.txt "$STAGE/Откройте первым.txt"
 hdiutil create -volname "topbar" -srcfolder "$STAGE" -ov -format UDZO "$OUT/$DMG" >/dev/null
+cp "$OUT/$DMG" "$OUT/topbar.dmg"   # постоянное имя: ссылка …/releases/latest/download/topbar.dmg всегда ведёт на свежий образ
 
 # Описание версии и лента.
 NOTES="${1:-}"

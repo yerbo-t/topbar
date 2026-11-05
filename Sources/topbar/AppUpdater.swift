@@ -10,6 +10,7 @@ import UserNotifications
 final class AppUpdater: NSObject, SPUUpdaterDelegate, @preconcurrency SPUStandardUserDriverDelegate, UNUserNotificationCenterDelegate {
     private var controller: SPUStandardUpdaterController?
     private let defaults = UserDefaults.standard
+    private var windowTimer: Timer?
     private static let notifiedKey = "updateNotifiedVersion"
 
     /// Версия, о которой знаем, но не поставили; nil — новой нет.
@@ -35,6 +36,36 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, @preconcurrency SPUStandar
     func checkForUpdates() {
         NSApp.activate(ignoringOtherApps: true)
         controller?.checkForUpdates(nil)
+        startBringingWindowsForward()
+    }
+
+    /// Окна Sparkle обычные: поверх полноэкранного приложения они не показались бы, а их несколько подряд (описание версии,
+    /// «Готово к установке»). Пока идёт обновление, каждое новое окно переносится на текущий рабочий стол.
+    private func startBringingWindowsForward() {
+        windowTimer?.invalidate()
+        var ticks = 0
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                Self.bringUpdateWindowsForward()
+                ticks += 1
+                if ticks > 1200 { self?.stopBringingWindowsForward() }   // не дольше 10 минут
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        windowTimer = timer
+    }
+
+    private func stopBringingWindowsForward() {
+        windowTimer?.invalidate()
+        windowTimer = nil
+    }
+
+    private static func bringUpdateWindowsForward() {
+        for window in NSApp.windows where !(window is NSPanel) && window.styleMask.contains(.titled) && window.level != .floating {
+            window.collectionBehavior.formUnion([.canJoinAllSpaces, .fullScreenAuxiliary])
+            window.level = .floating
+            window.orderFrontRegardless()
+        }
     }
 
     // MARK: SPUStandardUserDriverDelegate — мягкие напоминания
@@ -54,6 +85,7 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, @preconcurrency SPUStandar
 
     func standardUserDriverWillFinishUpdateSession() {
         availableVersion = nil
+        stopBringingWindowsForward()
         removeDeliveredNotification()
     }
 

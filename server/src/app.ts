@@ -152,7 +152,7 @@ export function clientIp(c: Context, hops: number): string {
     if (ip) return ip;
   }
   try {
-    return getConnInfo(c).remote.address ?? "unknown";
+    return (getConnInfo(c).remote.address ?? "unknown").replace(/^::ffff:/, "");
   } catch {
     return "unknown";
   }

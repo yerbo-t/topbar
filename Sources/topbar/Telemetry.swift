@@ -148,21 +148,24 @@ final class Telemetry {
         let alert = NSAlert()
         alert.messageText = "Отзыв о topbar"
         alert.informativeText = "Что работает, что мешает, чего не хватает. Вместе с текстом уйдут версия приложения и номер установки; сервер видит ваш IP-адрес."
-        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 360, height: 120))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 156))
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 32, width: 360, height: 124))
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 344, height: 124))
         textView.isRichText = false
         textView.font = .systemFont(ofSize: 13)
         textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
         textView.textContainerInset = NSSize(width: 4, height: 4)
-        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 360, height: 120))
         scroll.documentView = textView
-        scroll.hasVerticalScroller = true
-        scroll.borderType = .bezelBorder
         let contact = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
-        contact.placeholderString = "Как вам ответить: почта или телеграм (необязательно)"
-        let stack = NSStackView(views: [scroll, contact])
-        stack.orientation = .vertical
-        stack.spacing = 8
-        stack.frame = NSRect(x: 0, y: 0, width: 360, height: 152)
+        contact.placeholderString = "Почта или телеграм для ответа (по желанию)"
+        container.addSubview(scroll)
+        container.addSubview(contact)
+        let stack = container
         alert.accessoryView = stack
         alert.addButton(withTitle: "Отправить")
         alert.addButton(withTitle: "Отмена")

@@ -34,7 +34,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         model.startPlayerIfEnabled()
-        if !CommandLine.arguments.contains("--skip-onboarding") { updater.start() }
+        if !CommandLine.arguments.contains("--skip-onboarding") || CommandLine.arguments.contains("--debug-updater") { updater.start() }
+        if CommandLine.arguments.contains("--debug-ping") { telemetry.pingIfNeeded() }
+        if CommandLine.arguments.contains("--debug-feedback") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.telemetry.askFeedback() }
+        }
         // Точное определение терминала в Ghostty: узнать (и при необходимости спросить) разрешение «Автоматизация».
         if !CommandLine.arguments.contains("--skip-onboarding") { GhosttyAccess.shared.refresh(ask: true) }
         let center = NotificationCenter.default
