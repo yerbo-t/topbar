@@ -61,6 +61,19 @@ public struct Session: Equatable, Sendable {
     public var queue: [PermissionRequest]
 
     public var toolRunning: Bool { !running.isEmpty }
+
+    /// Совпадает ли то, что видит интерфейс (время событий, список вызовов, признаки окна и pid не в счёт).
+    public func sameForDisplay(as other: Session) -> Bool {
+        sessionId == other.sessionId && project == other.project && projectRoot == other.projectRoot
+            && branch == other.branch && status == other.status && currentAction == other.currentAction
+            && hostApp == other.hostApp && tty == other.tty && permissionMode == other.permissionMode
+            && unseenDone == other.unseenDone
+            && queue.map(\.requestId) == other.queue.map(\.requestId)
+    }
+
+    public static func sameForDisplay(_ a: [Session], _ b: [Session]) -> Bool {
+        a.count == b.count && zip(a, b).allSatisfy { $0.sameForDisplay(as: $1) }
+    }
 }
 
 public struct Summary: Equatable, Sendable {

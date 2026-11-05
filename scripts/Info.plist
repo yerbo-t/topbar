@@ -12,5 +12,6 @@
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSAppleEventsUsageDescription</key><string>topbar узнаёт, какой терминал Ghostty в фокусе, и переносит вас к нужной сессии.</string>
 </dict>
 </plist>

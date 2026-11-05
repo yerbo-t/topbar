@@ -101,6 +101,39 @@ final class IslandPresenterTests: XCTestCase {
         XCTAssertTrue(WatchPolicy.isWatching(session("c", .working, host: "VS Code"), frontmostBundleId: "com.microsoft.VSCode"))
     }
 
+    func testGhosttyWatchPolicyComparesTerminalWhenKnown() {
+        var s = session("a", .working, host: "Ghostty")
+        s.tty = "ttys004"
+        let ghostty = "com.mitchellh.ghostty"
+        XCTAssertTrue(WatchPolicy.isWatching(s, frontmostBundleId: ghostty, ghosttyFocusedTTY: "/dev/ttys004"))
+        XCTAssertFalse(WatchPolicy.isWatching(s, frontmostBundleId: ghostty, ghosttyFocusedTTY: "/dev/ttys001"),
+                       "Ghostty активен, но в фокусе другая вкладка: на эту сессию не смотрят")
+        XCTAssertTrue(WatchPolicy.isWatching(s, frontmostBundleId: ghostty, ghosttyFocusedTTY: nil),
+                      "не удалось узнать фокус — решаем по приложению")
+        s.tty = nil
+        XCTAssertTrue(WatchPolicy.isWatching(s, frontmostBundleId: ghostty, ghosttyFocusedTTY: "/dev/ttys001"),
+                      "терминал сессии неизвестен — решаем по приложению")
+        XCTAssertFalse(WatchPolicy.isWatching(s, frontmostBundleId: "com.apple.Safari", ghosttyFocusedTTY: "/dev/ttys004"))
+    }
+
+    func testSameForDisplayIgnoresInvisibleFields() {
+        let a = session("a", .working)
+        var b = a
+        b.lastEventAt = Fx.t0.addingTimeInterval(99)
+        b.pid = 777
+        b.hints = ["GHOSTTY_SURFACE_ID": "x"]
+        b.running = [RunningTool(toolUseId: "u", toolName: "Bash", fingerprint: "", startedAt: Fx.t0)]
+        XCTAssertTrue(a.sameForDisplay(as: b))
+        var c = a
+        c.currentAction = "Bash: ls"
+        XCTAssertFalse(a.sameForDisplay(as: c))
+        var d = a
+        d.status = .done
+        XCTAssertFalse(Session.sameForDisplay([a], [d]))
+        XCTAssertFalse(Session.sameForDisplay([a], [a, a]))
+        XCTAssertTrue(Session.sameForDisplay([], []))
+    }
+
     func testSettingsFileKeepsSymlinkAndMode() throws {
         let dir = Fx.tempDir()
         let target = dir.appendingPathComponent("real.json")

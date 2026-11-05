@@ -7,6 +7,11 @@ import TopbarCore
 final class IslandViewModel: ObservableObject {
     @Published private(set) var presenter = IslandPresenter()
     @Published private(set) var titles: [String: String] = [:]
+    /// Размеры считаются один раз на изменение (замер текста не должен повторяться при каждой перерисовке).
+    private(set) var size: CGSize = .zero
+    private(set) var earWidth: CGFloat = 110
+    private var pendingSessions: [Session]?
+    private var flushTask: Task<Void, Never>?
     /// Список раскрыт кликом (остаётся, пока владелец не свернёт); наведением раскрывается временно.
     private var pinned = false
     private var hoverTask: Task<Void, Never>?
@@ -23,16 +28,13 @@ final class IslandViewModel: ObservableObject {
         self.geometry = NotchGeometry.find()
 
         hub.onChange = { [weak self] sessions in
-            MainActor.assumeIsolated {
-                self?.apply { $0.update(sessions: sessions) }
-                self?.titles = SessionStore.displayTitles(sessions)
-                if CommandLine.arguments.contains("--debug-open-list"), !sessions.isEmpty, self?.pinned == false {
-                    self?.toggleList()   // отладка: список сразу раскрыт
-                }
-            }
+            MainActor.assumeIsolated { self?.enqueue(sessions) }
         }
         hub.onRequestOpened = { [weak self] request, _ in
-            MainActor.assumeIsolated { self?.apply { $0.requestOpened(request.requestId) } }
+            MainActor.assumeIsolated {
+                self?.flushPending()   // карточке нужны свежие сессии
+                self?.apply { $0.requestOpened(request.requestId) }
+            }
         }
         hub.onRequestClosed = { [weak self] id in
             MainActor.assumeIsolated { self?.apply { $0.requestClosed(id) } }
@@ -40,9 +42,21 @@ final class IslandViewModel: ObservableObject {
         hub.onSessionDone = { [weak self] session in
             MainActor.assumeIsolated { self?.sessionDone(session) }
         }
-        hub.autoOpenPolicy = { [system] session, _ in
-            system.hasNotchScreen && !WatchPolicy.isWatching(session, frontmostBundleId: system.frontmostBundleId)
+        // Решение «раскрывать ли остров сам» принимаем на главном потоке (AppleScript не любит других) и не блокируем хаб.
+        hub.autoOpenDecider = { [weak self] session, _, done in
+            Task { @MainActor in
+                guard let self else { return done(false) }
+                done(self.system.hasNotchScreen && !self.isWatching(session))
+            }
         }
+        recomputeLayout()
+    }
+
+    /// Владелец смотрит на сессию: приложение-хост активно, а для Ghostty — ещё и терминал сессии в фокусе.
+    func isWatching(_ session: Session) -> Bool {
+        let front = system.frontmostBundleId
+        let focused = (front == GhosttyScripting.bundleId && session.tty != nil) ? GhosttyScripting.focusedTTY() : nil
+        return WatchPolicy.isWatching(session, frontmostBundleId: front, ghosttyFocusedTTY: focused)
     }
 
     var mode: IslandMode { presenter.mode }
@@ -51,8 +65,14 @@ final class IslandViewModel: ObservableObject {
 
     static let listWidth: CGFloat = 440
 
+    /// Пересчитать размеры; зовётся после каждого изменения состояния и смены экрана.
+    func recomputeLayout() {
+        earWidth = computeEarWidth()
+        size = computeSize()
+    }
+
     /// Ширина «уха» по самому длинному содержимому (оба уха одинаковые, чтобы остров стоял симметрично у выреза).
-    var earWidth: CGFloat {
+    private func computeEarWidth() -> CGFloat {
         let parts = presenter.summaryParts
         let left = parts.first.map { [$0] } ?? []
         let right = Array(parts.dropFirst())
@@ -64,7 +84,7 @@ final class IslandViewModel: ObservableObject {
         return max(110, ceil(max(width(left), width(right))))
     }
 
-    var size: CGSize {
+    private func computeSize() -> CGSize {
         let notchH = geometry?.notchHeight ?? 32
         let notchW = geometry?.notchWidth ?? 200
         switch presenter.mode {
@@ -151,15 +171,35 @@ final class IslandViewModel: ObservableObject {
         var next = presenter
         change(&next)
         presenter = next
+        recomputeLayout()
         if CommandLine.arguments.contains("--debug") {
             FileHandle.standardError.write(Data("[island] mode=\(next.mode) summary=\"\(next.summaryText)\" sessions=\(next.sessions.map { "\($0.project):\($0.status)" })\n".utf8))
         }
         onLayoutChange?()
     }
 
+    /// События идут потоком (каждый вызов инструмента — два): копим и перерисовываем не чаще раза в 40 мс.
+    private func enqueue(_ sessions: [Session]) {
+        pendingSessions = sessions
+        guard flushTask == nil else { return }
+        flushTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 40_000_000)
+            self?.flushPending()
+        }
+    }
+
+    private func flushPending() {
+        flushTask?.cancel()
+        flushTask = nil
+        guard let sessions = pendingSessions else { return }
+        pendingSessions = nil
+        apply { $0.update(sessions: sessions) }
+        titles = SessionStore.displayTitles(sessions)
+        if CommandLine.arguments.contains("--debug-open-list"), !sessions.isEmpty, !pinned { toggleList() }
+    }
+
     private func sessionDone(_ session: Session) {
-        guard Settings.soundEnabled,
-              !WatchPolicy.isWatching(session, frontmostBundleId: system.frontmostBundleId) else { return }
+        guard Settings.soundEnabled, !isWatching(session) else { return }
         NSSound(named: "Tink")?.play()
     }
 }

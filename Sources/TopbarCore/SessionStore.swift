@@ -60,7 +60,7 @@ public struct SessionStore {
         if let started = msg.processStartedAt { s.processStartedAt = started }
         if let host = Self.hostName(msg.termProgram) { s.hostApp = host }
         if let tty = msg.tty { s.tty = tty }
-        if !msg.hints.isEmpty { s.hints = msg.hints }
+        if !msg.hints.isEmpty, s.hints != msg.hints { s.hints = msg.hints }
         if let mode = ev.permissionMode { s.permissionMode = mode }
         s.lastEventAt = now
 

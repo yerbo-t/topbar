@@ -111,10 +111,10 @@ final class SessionHubTests: XCTestCase {
         wait(for: [reported], timeout: 2)
     }
 
-    func testAutoOpenPolicyFalseKeepsChannelSoRowClickCanStillDecide() throws {
+    func testAutoOpenDeciderFalseKeepsChannelSoRowClickCanStillDecide() throws {
         let path = Fx.socketPath()
         let hub = makeHub(path: path)
-        hub.autoOpenPolicy = { _, _ in false }   // владелец смотрит на сессию
+        hub.autoOpenDecider = { _, _, done in done(false) }   // владелец смотрит на сессию
         var autoOpened = false
         hub.onRequestOpened = { _, _ in autoOpened = true }
         try hub.start()
@@ -301,5 +301,70 @@ final class SessionHubTests: XCTestCase {
             hub.tickNow()
             XCTAssertEqual(hub.snapshot().first?.status, expected, "дочерние процессы: \(hasChildren)")
         }
+    }
+
+    // MARK: асинхронное решение об автораскрытии, лишние перерисовки
+
+    func testAsyncDeciderOpensCardLaterWithoutBlockingTheHub() throws {
+        let path = Fx.socketPath()
+        let hub = makeHub(path: path)
+        hub.autoOpenDecider = { _, _, done in
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { done(true) }
+        }
+        let opened = expectation(description: "opened")
+        hub.onRequestOpened = { _, _ in opened.fulfill() }
+        try hub.start()
+        defer { hub.stop() }
+
+        let pending = requestInBackground(path)
+        waitUntil { hub.snapshot().first?.status == .waitingPermission }
+        // Пока решение «думается», хаб принимает другие события без задержки.
+        let started = Date()
+        _ = bridge(hook("UserPromptSubmit", sid: "other"), path: path, env: ["CLAUDE_PID": "\(getppid())"])
+        XCTAssertLessThan(Date().timeIntervalSince(started), 0.25)
+        wait(for: [opened], timeout: 2)
+        hub.decide(requestId: try XCTUnwrap(hub.snapshot().first { $0.sessionId == "s1" }?.queue.first?.requestId), allow: true)
+        wait(for: [pending.done], timeout: 3)
+    }
+
+    func testDeciderAnswerIsIgnoredIfRequestAlreadyClosed() throws {
+        let path = Fx.socketPath()
+        let hub = makeHub(path: path)
+        var finish: ((Bool) -> Void)?
+        let asked = expectation(description: "asked")
+        hub.autoOpenDecider = { _, _, done in finish = done; asked.fulfill() }
+        var opened = 0
+        hub.onRequestOpened = { _, _ in opened += 1 }
+        try hub.start()
+        defer { hub.stop() }
+
+        let pending = requestInBackground(path)
+        wait(for: [asked], timeout: 2)
+        _ = bridge(hook("PostToolUse", tool: "Bash"), path: path)   // ответили в терминале, пока решали
+        wait(for: [pending.done], timeout: 3)
+        finish?(true)
+        hub.flush()
+        XCTAssertEqual(opened, 0, "карточку для уже закрытого запроса не открываем")
+    }
+
+    func testChangesInvisibleToTheUIDoNotTriggerOnChange() throws {
+        let path = Fx.socketPath()
+        let hub = makeHub(path: path)
+        var changes = 0
+        hub.onChange = { _ in changes += 1 }
+        try hub.start()
+        defer { hub.stop() }
+
+        _ = bridge(hook("UserPromptSubmit"), path: path)
+        _ = bridge(hook("PreToolUse", tool: "Bash", input: ["command": "ls"]), path: path)
+        hub.flush()
+        let before = changes
+        // PostToolUse не меняет ничего, что видно на экране: статус и действие прежние.
+        _ = bridge(hook("PostToolUse", tool: "Bash", input: ["command": "ls"]), path: path)
+        hub.flush()
+        XCTAssertEqual(changes, before, "лишней перерисовки нет")
+        _ = bridge(hook("Stop"), path: path)
+        hub.flush()
+        XCTAssertEqual(changes, before + 1, "а настоящее изменение доходит")
     }
 }

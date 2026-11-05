@@ -99,9 +99,16 @@ public enum WatchPolicy {
         "VS Code": "com.microsoft.VSCode",
     ]
 
-    public static func isWatching(_ session: Session, frontmostBundleId: String?) -> Bool {
-        guard let host = session.hostApp, let expected = bundleIds[host], let front = frontmostBundleId else { return false }
-        return front == expected
+    /// Владелец смотрит на сессию: активно приложение-хост; для Ghostty, если известен терминал сессии и удалось узнать
+    /// терминал в фокусе (`ghosttyFocusedTTY`, например `/dev/ttys004`), они должны совпасть. Не удалось узнать — по приложению.
+    public static func isWatching(_ session: Session, frontmostBundleId: String?, ghosttyFocusedTTY: String? = nil) -> Bool {
+        guard let host = session.hostApp, let expected = bundleIds[host], let front = frontmostBundleId, front == expected else {
+            return false
+        }
+        if host == "Ghostty", let tty = session.tty, let focused = ghosttyFocusedTTY {
+            return focused == "/dev/" + tty
+        }
+        return true
     }
 
     public static func bundleId(forHost host: String?) -> String? { host.flatMap { bundleIds[$0] } }

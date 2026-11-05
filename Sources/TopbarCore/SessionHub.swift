@@ -7,9 +7,10 @@ public final class SessionHub {
     public let queue = DispatchQueue(label: "topbar.hub")
     public let callbackQueue: DispatchQueue
 
-    /// Раскрывать ли остров сам по этому запросу. false (владелец смотрит на сессию, нет экрана) —
-    /// запрос всё равно остаётся в сессии, и карточку можно открыть вручную: канал к мосту держится.
-    public var autoOpenPolicy: (Session, PermissionRequest) -> Bool = { _, _ in true }
+    /// Раскрывать ли остров сам по этому запросу; ответ можно дать позже и с любой очереди (ожидание не блокирует хаб).
+    /// false (владелец смотрит на сессию, нет экрана) — запрос всё равно остаётся в сессии, и карточку можно открыть
+    /// вручную: канал к мосту держится.
+    public var autoOpenDecider: (Session, PermissionRequest, @escaping (Bool) -> Void) -> Void = { _, _, done in done(true) }
     public var onChange: (([Session]) -> Void)?
     /// Появился запрос, который нужно показать карточкой (вопросы вроде `AskUserQuestion` сюда не попадают).
     public var onRequestOpened: ((PermissionRequest, Session) -> Void)?
@@ -23,6 +24,7 @@ public final class SessionHub {
     private var server: SocketServer!
     private var channels: [String: ReplyChannel] = [:]
     private var timer: DispatchSourceTimer?
+    private var lastEmitted: [Session] = []
     private let livenessInterval: TimeInterval
     private let hasChildProcess: (Session) -> Bool
     private let staleToolAfter: TimeInterval
@@ -48,7 +50,7 @@ public final class SessionHub {
     public func start() throws {
         try server.start()
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + livenessInterval, repeating: livenessInterval)
+        t.schedule(deadline: .now() + livenessInterval, repeating: livenessInterval, leeway: .seconds(2)) // реже будить процессор
         t.setEventHandler { [weak self] in self?.tick() }
         t.resume()
         timer = t
@@ -137,14 +139,14 @@ public final class SessionHub {
 
         let effects = store.apply(msg, now: Date())
 
-        var opened: (PermissionRequest, Session)?
+        var toOpen: (PermissionRequest, Session)?
         if isRequest {
             if let session = store.sessions[ev.sessionId],
                let request = session.queue.first(where: { $0.requestId == msg.requestId }),
                request.cardable {
                 channels[request.requestId] = channel
                 channel.onClose = { [weak self] in self?.channelClosed(request.requestId) }
-                if autoOpenPolicy(session, request) { opened = (request, session) }
+                toOpen = (request, session)
             } else {
                 channel.send(.none) // вопрос без кнопок или запрос не попал в автомат
             }
@@ -161,8 +163,17 @@ public final class SessionHub {
                 break
             }
         }
-        if let (request, session) = opened { emit { self.onRequestOpened?(request, session) } }
         notifyChange()
+        if let (request, session) = toOpen {
+            autoOpenDecider(session, request) { [weak self] open in
+                guard open, let self else { return }
+                self.queue.async {
+                    // Запрос мог закрыться, пока решали (ответили в терминале).
+                    guard self.channels[request.requestId] != nil else { return }
+                    self.emit { self.onRequestOpened?(request, session) }
+                }
+            }
+        }
     }
 
     /// Мост отключился (хук истёк, процесс убит): кнопки на карточке уже бесполезны.
@@ -186,8 +197,12 @@ public final class SessionHub {
         if changed { notifyChange() }
     }
 
+    /// Сообщает интерфейсу только о том, что он видит: события, не меняющие картинку (например, `PostToolUse`),
+    /// перерисовку не вызывают.
     private func notifyChange() {
         let sessions = store.snapshot()
+        if Session.sameForDisplay(sessions, lastEmitted) { return }
+        lastEmitted = sessions
         emit { self.onChange?(sessions) }
     }
 }

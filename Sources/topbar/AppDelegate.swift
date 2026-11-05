@@ -11,6 +11,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var observers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let i = CommandLine.arguments.firstIndex(of: "--socket"), i + 1 < CommandLine.arguments.count {
+            Paths.socketPathOverride = CommandLine.arguments[i + 1]
+        }
         hub = SessionHub(socketPath: Paths.socketPath, callbackQueue: .main)
         model = IslandViewModel(hub: hub, system: system)
         panel = IslandPanelController(model: model)

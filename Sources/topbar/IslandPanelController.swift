@@ -35,6 +35,7 @@ final class IslandPanelController {
     /// Пересчитать окно по текущему состоянию.
     func layout() {
         model.geometry = NotchGeometry.find()
+        model.recomputeLayout()
         guard let geometry = model.geometry, model.mode != .hidden else {
             panel.orderOut(nil)
             return
