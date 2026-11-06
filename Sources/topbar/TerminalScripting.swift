@@ -13,19 +13,21 @@ final class AutomationAccess: @unchecked Sendable {
 
     func isGranted(_ bundleId: String) -> Bool { lock.lock(); defer { lock.unlock() }; return granted.contains(bundleId) }
 
-    /// Узнать состояние разрешения; `ask` — показать системный запрос (один раз за запуск на приложение). Частые вызовы
-    /// (проверка «смотрит ли владелец» идёт на каждое событие) схлопываются: не чаще раза в две секунды.
+    /// Узнать состояние разрешения; `ask` — показать системный запрос (один раз за запуск на приложение). Частые проверки
+    /// (идут на каждое событие и раз в секунду из окна настройки) схлопываются: не чаще раза в две секунды, но первый запрос
+    /// разрешения не теряется. Незапущенное приложение пропускаем: система ответить не может, и «спрашивали» не считается.
     func refresh(_ bundleId: String, ask: Bool) {
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty else { return }
         lock.lock()
         let now = Date()
-        if let last = lastCheck[bundleId], now.timeIntervalSince(last) < 2 { lock.unlock(); return }
+        let willAsk = ask && !asked.contains(bundleId)
+        if !willAsk, let last = lastCheck[bundleId], now.timeIntervalSince(last) < 2 { lock.unlock(); return }
         lastCheck[bundleId] = now
-        let shouldAsk = ask && asked.insert(bundleId).inserted
+        if willAsk { asked.insert(bundleId) }
         lock.unlock()
         DispatchQueue.global(qos: .utility).async { [self] in
-            guard !NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty else { return }
             let target = NSAppleEventDescriptor(bundleIdentifier: bundleId)
-            let status = AEDeterminePermissionToAutomateTarget(target.aeDesc, typeWildCard, typeWildCard, shouldAsk)
+            let status = AEDeterminePermissionToAutomateTarget(target.aeDesc, typeWildCard, typeWildCard, willAsk)
             lock.lock()
             if status == noErr { granted.insert(bundleId) } else { granted.remove(bundleId) }
             lock.unlock()
@@ -102,8 +104,12 @@ enum TerminalScripting {
                 """ }),
     ]
 
-    private static var cachedTTY: [String: (value: String?, at: Date)] = [:]
+    /// Ответ о вкладке в фокусе: значение и до какого времени ему верить (ошибку помним дольше, чтобы не мучить зависший терминал).
+    private static var cachedTTY: [String: (value: String?, until: Date)] = [:]
     private static var compiled: [String: NSAppleScript] = [:]
+
+    /// Скрипт с предельным временем ожидания: зависший терминал задерживает приложение не дольше двух секунд.
+    private static func guarded(_ body: String) -> String { "with timeout of 2 seconds\n\(body)\nend timeout" }
 
     static func supports(_ bundleId: String?) -> Bool { bundleId.map { drivers[$0] != nil } ?? false }
 
@@ -114,12 +120,12 @@ enum TerminalScripting {
     /// Вкладка в фокусе (`/dev/ttys004`); ответ кэшируется на полсекунды, чтобы не гонять AppleScript на каждое событие.
     static func focusedTTY(bundleId: String) -> String? {
         guard let driver = drivers[bundleId], isRunning(bundleId), AutomationAccess.shared.isGranted(bundleId) else { return nil }
-        if let cached = cachedTTY[bundleId], Date().timeIntervalSince(cached.at) < 0.5 { return cached.value }
-        let script = compiled[bundleId] ?? NSAppleScript(source: driver.focusedScript)
+        if let cached = cachedTTY[bundleId], Date() < cached.until { return cached.value }
+        let script = compiled[bundleId] ?? NSAppleScript(source: guarded(driver.focusedScript))
         compiled[bundleId] = script
         var error: NSDictionary?
         let value = script?.executeAndReturnError(&error).stringValue
-        cachedTTY[bundleId] = (error == nil ? value : nil, Date())
+        cachedTTY[bundleId] = error == nil ? (value, Date().addingTimeInterval(0.5)) : (nil, Date().addingTimeInterval(5))
         return cachedTTY[bundleId]?.value
     }
 
@@ -129,7 +135,7 @@ enum TerminalScripting {
         guard let driver = drivers[bundleId], isRunning(bundleId), AutomationAccess.shared.isGranted(bundleId) else { return false }
         let device = "/dev/" + tty.filter { $0.isLetter || $0.isNumber }
         var error: NSDictionary?
-        let result = NSAppleScript(source: driver.focusScript(device))?.executeAndReturnError(&error).stringValue
+        let result = NSAppleScript(source: guarded(driver.focusScript(device)))?.executeAndReturnError(&error).stringValue
         cachedTTY[bundleId] = nil
         return error == nil && result == "ok"
     }

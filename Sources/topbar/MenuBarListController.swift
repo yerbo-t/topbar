@@ -73,7 +73,13 @@ final class MenuBarListController {
 
     private func layout() {
         guard panel.isVisible || anchor != .zero else { return }
-        let screen = NSScreen.screens.first(where: { $0.frame.intersects(anchor) }) ?? NSScreen.main
+        // Окно знака может быть не на экране (полноэкранное окно прячет строку меню): тогда панель — у верхнего правого угла.
+        var anchor = anchor
+        var screen = NSScreen.screens.first(where: { $0.frame.intersects(anchor) })
+        if screen == nil, let main = NSScreen.main {
+            screen = main
+            anchor = NSRect(x: main.frame.maxX - 60, y: main.frame.maxY - 24, width: 36, height: 24)
+        }
         guard let frame = screen?.frame else { return }
         let width = MenuBarListView.width
         var height: CGFloat = 40 + 52          // шапка и подвал

@@ -17,6 +17,7 @@ final class IslandViewModel: ObservableObject {
     @Published private(set) var titles: [String: String] = [:]
     /// Что играет в системе (nil — ничего) и обложка; положение в треке считает вид сам.
     @Published private(set) var nowPlaying: NowPlaying?
+    private var sourceCache: (pid: Int, app: NSRunningApplication?)?
     @Published private(set) var artwork: NSImage?
     private var pausedSince: Date?
     private var pauseTimer: DispatchWorkItem?
@@ -173,11 +174,16 @@ final class IslandViewModel: ObservableObject {
     /// приложение с окном среди его предков. nil — не нашли.
     var mediaSourceApp: NSRunningApplication? {
         guard let pid = nowPlaying?.pid, pid > 0 else { return nil }
+        // Вид спрашивает это на каждом обновлении (раз в секунду, пока идёт трек): обход процессов запоминаем по pid.
+        if let cached = sourceCache, cached.pid == pid, cached.app?.isTerminated != true { return cached.app }
+        var found: NSRunningApplication?
         if let app = NSRunningApplication(processIdentifier: pid_t(pid)), app.activationPolicy != .prohibited, app.bundleIdentifier != nil {
-            return app
+            found = app
+        } else if let id = SessionJumper.windowedAppBundleId(ancestorOf: Int32(pid)) {
+            found = NSRunningApplication.runningApplications(withBundleIdentifier: id).first
         }
-        guard let id = SessionJumper.windowedAppBundleId(ancestorOf: Int32(pid)) else { return nil }
-        return NSRunningApplication.runningApplications(withBundleIdentifier: id).first
+        sourceCache = (pid, found)
+        return found
     }
 
     var mediaSourceName: String? { mediaSourceApp?.localizedName }

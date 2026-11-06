@@ -23,6 +23,12 @@ enum Settings {
         set { UserDefaults.standard.set(newValue, forKey: setupGuideKey) }
     }
 
+    /// Когда окно настройки открылось само в последний раз (секунды с эпохи); 0 — ни разу.
+    static var setupGuideAutoOpenedAt: Double {
+        get { UserDefaults.standard.double(forKey: "setupGuideAutoOpenedAt") }
+        set { UserDefaults.standard.set(newValue, forKey: "setupGuideAutoOpenedAt") }
+    }
+
     /// Плеер («Сейчас играет») показывается на острове.
     static var playerEnabled: Bool {
         get { UserDefaults.standard.object(forKey: playerKey) as? Bool ?? true }

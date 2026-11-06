@@ -58,9 +58,15 @@ public struct SessionStore {
 
         if msg.pid > 0 { s.pid = msg.pid }
         if let started = msg.processStartedAt { s.processStartedAt = started }
-        if msg.termProgram != nil || msg.hostBundleId != nil {
-            s.hostApp = Self.hostName(msg.termProgram, bundleId: msg.hostBundleId)
-            s.hostBundleId = TerminalHost.bundleId(termProgram: msg.termProgram, bundleId: msg.hostBundleId)
+        if let bundle = msg.hostBundleId {
+            // Сообщено приложение: оно главнее TERM_PROGRAM (форки VS Code, tmux).
+            s.hostBundleId = bundle
+            s.hostApp = Self.hostName(msg.termProgram, bundleId: bundle)
+        } else if let term = msg.termProgram, s.hostBundleId == nil {
+            // Приложение не сообщено и раньше не было известно: определяем по TERM_PROGRAM. Если уже знаем приложение,
+            // событие с одним лишь TERM_PROGRAM (`tmux`) его не затирает.
+            s.hostBundleId = TerminalHost.bundleId(termProgram: term, bundleId: nil)
+            s.hostApp = Self.hostName(term, bundleId: nil)
         }
         if let tty = msg.tty { s.tty = tty }
         if !msg.hints.isEmpty, s.hints != msg.hints { s.hints = msg.hints }

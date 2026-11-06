@@ -296,4 +296,17 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.sessions["s1"]?.hostBundleId, "com.example.NewTerminal")
         XCTAssertNil(store.sessions["s1"]?.hostApp)
     }
+
+    func testHostIsNotErasedByAnEventThatCarriesOnlyOneOfTheFields() {
+        var first = Fx.msg("UserPromptSubmit", term: "iTerm.app")
+        first.hostBundleId = "com.googlecode.iterm2"
+        store.apply(first, now: now)
+        // Следующее событие пришло без идентификатора приложения (и с TERM_PROGRAM=tmux): прежнее знание не теряется.
+        store.apply(Fx.msg("PreToolUse", term: "tmux"), now: now)
+        XCTAssertEqual(store.sessions["s1"]?.hostBundleId, "com.googlecode.iterm2")
+        XCTAssertEqual(store.sessions["s1"]?.hostApp, "iTerm2")
+        // А событие без обоих полей ничего не меняет.
+        store.apply(Fx.msg("PostToolUse", term: nil), now: now)
+        XCTAssertEqual(store.sessions["s1"]?.hostBundleId, "com.googlecode.iterm2")
+    }
 }

@@ -139,7 +139,7 @@ struct SetupGuideView: View {
                              symbol: "hand.tap",
                              lines: ["Наведите на вырез или кликните по нему: остров покажет сессии Claude Code. Клик по сессии откроет её терминал.",
                                      "Когда Claude просит разрешение, остров раскроется сам: «Разрешить» или «Отклонить» одним нажатием.",
-                                     "Правый клик по знаку: настройка значков (закрепить, скрыть глазом) и меню приложения.",
+                                     "Правый клик по знаку (на мыши без правой кнопки — клик с зажатым Control): настройка значков (закрепить, скрыть глазом) и меню приложения.",
                                      "Музыка: нажмите обложку в плеере, откроется приложение, из которого она играет."])
                 }
                 .padding(.horizontal, 24).padding(.bottom, 12)
@@ -190,8 +190,11 @@ struct SetupGuideView: View {
     }
 
     private var terminalsStep: some View {
-        let missing = model.terminals.contains { !$0.granted }
-        return StepCard(number: 3, title: "Разрешите управлять терминалом", state: model.terminals.isEmpty ? .optional : (missing ? .todo : .done)) {
+        // «Нужно» только для запущенных терминалов: Terminal есть на каждом Mac, и тем, кто им не пользуется, шаг не нужен.
+        let running = model.terminals.filter(\.running)
+        let missing = running.contains { !$0.granted }
+        let state: StepState = running.isEmpty ? (model.terminals.allSatisfy(\.granted) && !model.terminals.isEmpty ? .done : .optional) : (missing ? .todo : .done)
+        return StepCard(number: 3, title: "Разрешите управлять терминалом", state: state) {
             Text("Тогда по клику на сессию откроется именно её вкладка. Без этого topbar просто выводит приложение терминала вперёд. Разрешение нужно один раз для каждого терминала. Warp, WezTerm, kitty, VS Code, Cursor и другие работают и без него.")
             if model.terminals.isEmpty {
                 Text("Ghostty, Terminal и iTerm2 не найдены, этот шаг не нужен.").foregroundStyle(Color(white: 0.55))
@@ -244,21 +247,22 @@ struct SetupGuideView: View {
     }
 }
 
+enum StepState { case done, todo, optional, info }
+
 /// Карточка шага: номер или значок, заголовок, статус справа, внутри пояснение и кнопки.
 struct StepCard<Content: View>: View {
-    enum State { case done, todo, optional, info }
 
     var number: Int?
     var symbol: String?
     let title: String
-    let state: State
+    let state: StepState
     @ViewBuilder let content: Content
 
-    init(number: Int, title: String, state: State, @ViewBuilder content: () -> Content) {
+    init(number: Int, title: String, state: StepState, @ViewBuilder content: () -> Content) {
         self.number = number; self.symbol = nil; self.title = title; self.state = state; self.content = content()
     }
 
-    init(symbol: String, title: String, state: State, @ViewBuilder content: () -> Content) {
+    init(symbol: String, title: String, state: StepState, @ViewBuilder content: () -> Content) {
         self.number = nil; self.symbol = symbol; self.title = title; self.state = state; self.content = content()
     }
 

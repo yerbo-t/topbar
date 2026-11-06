@@ -28,20 +28,27 @@ final class MenuBarListModel: ObservableObject {
     private static let pinnedKey = "menuBarPinned"
     private static let hiddenKey = "menuBarEyeHidden"
     private static let usedKey = "menuBarLastUsed"
+    private static let knownAppsKey = "menuBarKnownApps"
     private var activationObserver: NSObjectProtocol?
+    /// Приложения, у которых когда-либо находился значок: только их активность учитывается для порядка по недавности.
+    private var knownApps: Set<String>
+    /// Что стало активным с прошлого открытия списка: в список попадёт при открытии, а не прямо под курсором владельца.
+    private var pendingUsed: [String: Double] = [:]
 
     init() {
         let defaults = UserDefaults.standard
         prefs = MenuBarPrefs(pinned: defaults.stringArray(forKey: Self.pinnedKey) ?? [],
                              hidden: defaults.stringArray(forKey: Self.hiddenKey) ?? [],
                              lastUsed: defaults.dictionary(forKey: Self.usedKey) as? [String: Double] ?? [:])
-        // Кто последним был в работе: приложение стало активным.
+        knownApps = Set(defaults.stringArray(forKey: Self.knownAppsKey) ?? [])
+        // Кто последним был в работе: приложение со значком стало активным.
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
             MainActor.assumeIsolated {
-                guard let id = app?.bundleIdentifier, id != Bundle.main.bundleIdentifier else { return }
-                self?.markUsed(id)
+                guard let self, let id = app?.bundleIdentifier, id != Bundle.main.bundleIdentifier, self.knownApps.contains(id) else { return }
+                self.pendingUsed[id] = Date().timeIntervalSince1970
+                self.save()
             }
         }
     }
@@ -63,6 +70,8 @@ final class MenuBarListModel: ObservableObject {
     }
 
     func refresh() {
+        for (key, seconds) in pendingUsed { prefs.markUsed(key, at: Date(timeIntervalSince1970: seconds)) }
+        pendingUsed = [:]
         trusted = MenuBarItemsProvider.isTrusted
         guard trusted, !loading, let geometry = NotchGeometry.find() else {
             if !MenuBarItemsProvider.isTrusted { entries = [] }
@@ -78,6 +87,8 @@ final class MenuBarListModel: ObservableObject {
                     guard let self else { return }
                     // Свои значки (знак topbar) в списке ни к чему: ими не управляют отсюда.
                     self.entries = found.filter { $0.width > 0 && $0.bundleId != Bundle.main.bundleIdentifier }
+                    self.knownApps.formUnion(found.map(\.bundleId))
+                    UserDefaults.standard.set(Array(self.knownApps), forKey: Self.knownAppsKey)
                     for entry in found where self.icons[entry.bundleId] == nil {
                         self.icons[entry.bundleId] = NSRunningApplication.runningApplications(withBundleIdentifier: entry.bundleId).first?.icon
                     }
@@ -134,7 +145,7 @@ final class MenuBarListModel: ObservableObject {
         let defaults = UserDefaults.standard
         defaults.set(prefs.pinned, forKey: Self.pinnedKey)
         defaults.set(prefs.hidden, forKey: Self.hiddenKey)
-        defaults.set(prefs.lastUsed, forKey: Self.usedKey)
+        defaults.set(prefs.lastUsed.merging(pendingUsed) { max($0, $1) }, forKey: Self.usedKey)
     }
 
     /// Нажать значок. Спрятанный кнопкой сворачивания — сначала показать значки; не помещённый системой — объяснить.

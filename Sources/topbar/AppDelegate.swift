@@ -69,8 +69,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.telemetry.askConsentIfNeeded()
             self.telemetry.pingIfNeeded()
             let hooksReady = HooksController().isInstalledAndHealthy()
-            if !Settings.setupGuideShown || !hooksReady {
+            // Само окно открывается при первом запуске, а потом не чаще раза в сутки и только пока не стоят хуки.
+            let dayAgo = Date().timeIntervalSince1970 - 24 * 3600
+            if !Settings.setupGuideShown || (!hooksReady && Settings.setupGuideAutoOpenedAt < dayAgo) {
                 Settings.setupGuideShown = true
+                Settings.setupGuideAutoOpenedAt = Date().timeIntervalSince1970
                 self.menu.showSetupGuide()
             }
         }
