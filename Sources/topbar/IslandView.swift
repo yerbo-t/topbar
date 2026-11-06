@@ -151,12 +151,14 @@ struct ListView: View {
     var body: some View {
         VStack(spacing: 0) {
             Spacer().frame(height: (model.geometry?.notchHeight ?? 32) + 6)
+            let offset = model.presenter.mediaActive ? 1 : 0
             if model.presenter.mediaActive {
-                PlayerView(model: model)
+                PlayerView(model: model).riseIn(0)
             }
-            ForEach(model.presenter.sessions, id: \.sessionId) { session in
+            ForEach(Array(model.presenter.sessions.enumerated()), id: \.element.sessionId) { index, session in
                 Button { model.rowTapped(session) } label: { RowView(session: session, title: model.titles[session.sessionId] ?? session.project) }
                     .buttonStyle(RowButtonStyle())
+                    .riseIn(index + offset)
             }
             HStack {
                 if !model.presenter.sessions.isEmpty {
@@ -184,7 +186,7 @@ struct ListView: View {
 struct RowButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(RoundedRectangle(cornerRadius: 12).fill(configuration.isPressed ? Color(white: 0.16) : Color.clear))
+            .background(RoundedRectangle(cornerRadius: 14).fill(configuration.isPressed ? Color(white: 0.16) : Color.clear))
             .contentShape(Rectangle())
     }
 }
@@ -192,22 +194,27 @@ struct RowButtonStyle: ButtonStyle {
 struct RowView: View {
     let session: Session
     let title: String
+    @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             StatusDot(status: session.status)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                sessionTitle(title, size: 14).lineLimit(1)
                 Text(session.currentAction.isEmpty ? (session.hostApp ?? "") : session.currentAction)
-                    .font(.system(size: 11.5)).foregroundStyle(Color(white: 0.66)).lineLimit(1)
+                    .font(.system(size: 11.5)).foregroundStyle(Look.muted).lineLimit(1)
             }
             Spacer(minLength: 8)
             Text(session.status.label)
                 .font(.system(size: 11.5))
-                .foregroundStyle(session.status == .idle ? Color(white: 0.66) : session.status.color)
+                .foregroundStyle(session.status == .idle ? Look.muted : session.status.color)
         }
-        .padding(.horizontal, 18)
+        .padding(.horizontal, 16)
         .frame(height: 54)
+        // Строке, которой нужно внимание (ждёт разрешения), — заметная подсветка, остальным — только под курсором.
+        .background(RoundedRectangle(cornerRadius: 14)
+            .fill(session.status == .waitingPermission ? Look.hot : (hovering ? Color.white.opacity(0.05) : .clear)))
+        .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
     }
 }
@@ -220,34 +227,27 @@ struct CardView: View {
             let title = model.titles[card.session.sessionId] ?? card.session.project
             VStack(alignment: .leading, spacing: 8) {
                 Spacer().frame(height: (model.geometry?.notchHeight ?? 32) + 2)
-                HStack {
-                    Text("Запрос разрешения").font(.system(size: 13, weight: .semibold))
-                    Spacer()
-                    if let mode = card.session.permissionMode, mode != "default" {
-                        Text("режим: \(mode)").font(.system(size: 11)).foregroundStyle(Color(white: 0.66))
-                    }
+                HStack(spacing: 10) {
+                    StatusDot(status: .waitingPermission)
+                    sessionTitle(title, size: 14).lineLimit(1)
+                    Spacer(minLength: 6)
+                    Text(headerNote(card)).font(.system(size: 11.5)).foregroundStyle(Look.muted).lineLimit(1)
                 }
-                HStack(spacing: 6) {
-                    Text(title).foregroundStyle(Color(white: 0.7))
-                    if let agent = card.request.agentType { Text("· субагент \(agent)").foregroundStyle(Color(white: 0.7)) }
-                }
-                .font(.system(size: 12)).lineLimit(1)
-                Text(card.request.toolName).font(.system(size: 11)).foregroundStyle(Color(white: 0.66))
                 ScrollView {
-                    Text(card.request.detail)
+                    (Text(card.request.toolName).foregroundColor(Look.tool) + Text("  " + card.request.detail).foregroundColor(Look.code))
                         .font(.system(size: 12, design: .monospaced))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 }
                 .padding(10)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color(white: 0.09)))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(white: 0.16)))
-                HStack(spacing: 8) {
-                    Button("Разрешить") { model.decide(allow: true) }
-                        .buttonStyle(CardButtonStyle(prominent: true)).fixedSize()
-                    Button("Отклонить") { model.decide(allow: false) }
-                        .buttonStyle(CardButtonStyle(prominent: false)).fixedSize()
+                .background(RoundedRectangle(cornerRadius: 12).fill(Look.codeFill))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Look.codeLine))
+                HStack(spacing: 10) {
                     Spacer(minLength: 0)
+                    Button("Отклонить") { model.decide(allow: false) }
+                        .buttonStyle(PillButtonStyle(kind: .neutral)).fixedSize()
+                    Button("Разрешить") { model.decide(allow: true) }
+                        .buttonStyle(PillButtonStyle(kind: .allow)).fixedSize()
                 }
                 HStack(spacing: 16) {
                     Button("Перейти к сессии") { model.jump(to: card.session) }
@@ -262,18 +262,16 @@ struct CardView: View {
             }
             .padding(.horizontal, 22)
             .padding(.bottom, 12)
+            .riseIn(0)
         }
     }
-}
 
-struct CardButtonStyle: ButtonStyle {
-    let prominent: Bool
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 13, weight: .semibold))
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            .foregroundStyle(prominent ? Color.black : Color.white)
-            .background(RoundedRectangle(cornerRadius: 10).fill(prominent ? Color(white: 0.92) : Color(white: 0.16)))
-            .opacity(configuration.isPressed ? 0.8 : 1)
+    /// «просит разрешение», а у субагента и особого режима — с пометкой (проект и ветка уже в подписи слева).
+    private func headerNote(_ card: (request: PermissionRequest, session: Session)) -> String {
+        var parts: [String] = []
+        if let agent = card.request.agentType { parts.append("субагент \(agent)") }
+        if let mode = card.session.permissionMode, mode != "default" { parts.append("режим \(mode)") }
+        parts.append("просит разрешение")
+        return parts.joined(separator: " · ")
     }
 }

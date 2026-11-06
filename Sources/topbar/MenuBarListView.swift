@@ -17,7 +17,7 @@ struct MenuBarListView: View {
                 Button { model.onUpdate?(); model.onClose?() } label: {
                     Label("Обновить до \(version)", systemImage: "arrow.down.circle.fill").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(CardButtonStyle(prominent: true))
+                .buttonStyle(PillButtonStyle(kind: .allow))
                 .padding(.horizontal, 18).padding(.bottom, 10)
                 .accessibilityHint("Откроет описание новой версии и предложит установить её")
             }
@@ -25,7 +25,7 @@ struct MenuBarListView: View {
                 Button { model.toggleHiding() } label: {
                     Label(title, systemImage: model.hidingSymbol).frame(maxWidth: .infinity)
                 }
-                .buttonStyle(CardButtonStyle(prominent: true))
+                .buttonStyle(PillButtonStyle(kind: .light))
                 .padding(.horizontal, 18).padding(.bottom, 10)
                 .accessibilityHint("Прячет значки левее знака topbar или возвращает их")
             }
@@ -112,9 +112,9 @@ struct MenuBarListView: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 10) {
                 Button("Дать доступ") { model.requestAccess() }
-                    .buttonStyle(CardButtonStyle(prominent: true)).fixedSize()
+                    .buttonStyle(PillButtonStyle(kind: .light)).fixedSize()
                 Button("Открыть настройки") { model.openAccessSettings() }
-                    .buttonStyle(CardButtonStyle(prominent: false)).fixedSize()
+                    .buttonStyle(PillButtonStyle(kind: .neutral)).fixedSize()
             }
             Text("Включили, а доступа всё равно нет? После обновления приложения система считает его новым: выделите topbar в списке настроек, нажмите «−» и добавьте заново («+»). Список обновится сам.")
                 .font(.system(size: 11)).foregroundStyle(Color(white: 0.55))

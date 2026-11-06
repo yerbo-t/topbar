@@ -2,23 +2,16 @@ import AppKit
 import SwiftUI
 import TopbarCore
 
-/// Плеер на острове: обложка, название, исполнитель, ход трека и три кнопки.
+/// Плеер на острове: крупная обложка, название, исполнитель, «эквалайзер», ход трека и три кнопки. Обложка с названием —
+/// кнопка: открывает приложение, откуда играет музыка.
 struct PlayerView: View {
     @ObservedObject var model: IslandViewModel
-    static let height: CGFloat = 146
+    static let height: CGFloat = 164
 
     var body: some View {
         if let np = model.nowPlaying {
-            VStack(spacing: 10) {
-                HStack(spacing: 12) {
-                    ArtworkView(image: model.artwork, size: 54, radius: 10)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(np.title).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
-                        Text(subtitle(np)).font(.system(size: 12)).foregroundStyle(Color(white: 0.66)).lineLimit(1)
-                    }
-                    Spacer(minLength: 8)
-                    EqualizerView(playing: np.playing).frame(width: 16, height: 14)
-                }
+            VStack(spacing: 12) {
+                OpenSourceRow(model: model, np: np)
                 ProgressRow(model: model, np: np)
                 HStack(spacing: 34) {
                     Spacer(minLength: 0)
@@ -28,14 +21,10 @@ struct PlayerView: View {
                     Spacer(minLength: 0)
                 }
             }
-            .padding(.horizontal, 22)
+            .padding(.horizontal, 18)
             .padding(.top, 6)
             .frame(height: Self.height, alignment: .top)
         }
-    }
-
-    private func subtitle(_ np: NowPlaying) -> String {
-        [np.artist, model.mediaSourceName].compactMap { $0 }.joined(separator: " · ")
     }
 
     private func control(_ symbol: String, size: CGFloat, label: String, action: @escaping () -> Void) -> some View {
@@ -44,6 +33,43 @@ struct PlayerView: View {
         }
         .buttonStyle(PlayerButtonStyle())
         .accessibilityLabel(label)
+    }
+}
+
+/// Верх плеера: обложка, название, исполнитель и источник. Нажатие выводит вперёд приложение-источник (стрелка справа).
+struct OpenSourceRow: View {
+    @ObservedObject var model: IslandViewModel
+    let np: NowPlaying
+    @State private var hovering = false
+
+    var body: some View {
+        let source = model.mediaSourceApp
+        Button { model.openMediaSource() } label: {
+            HStack(spacing: 14) {
+                ArtworkView(image: model.artwork, size: 68, radius: 13)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(np.title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                    Text([np.artist, source?.localizedName].compactMap { $0 }.joined(separator: " · "))
+                        .font(.system(size: 12.5)).foregroundStyle(Look.muted).lineLimit(1)
+                    EqualizerView(playing: np.playing, bars: 5).frame(width: 26, height: 14).padding(.top, 2)
+                }
+                Spacer(minLength: 8)
+                if source != nil {
+                    Image(systemName: "arrow.up.forward.app")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(hovering ? Color.white : Color(white: 0.5))
+                }
+            }
+            .padding(6)
+            .background(RoundedRectangle(cornerRadius: 16).fill(hovering && source != nil ? Color.white.opacity(0.07) : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(source == nil)
+        .onHover { hovering = $0 }
+        .help(source.flatMap { $0.localizedName }.map { "Открыть \($0)" } ?? "")
+        .accessibilityLabel(source?.localizedName.map { "Открыть \($0)" } ?? np.title)
+        .accessibilityHint("Выведет вперёд приложение, из которого играет музыка")
     }
 }
 
@@ -127,8 +153,9 @@ struct ArtworkView: View {
 /// «уменьшении движения» полоски стоят.
 struct EqualizerView: NSViewRepresentable {
     let playing: Bool
+    var bars = 3
 
-    func makeNSView(context: Context) -> EqualizerNSView { EqualizerNSView() }
+    func makeNSView(context: Context) -> EqualizerNSView { EqualizerNSView(bars: bars) }
     func updateNSView(_ view: EqualizerNSView, context: Context) {
         view.setPlaying(playing && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     }
@@ -138,10 +165,10 @@ final class EqualizerNSView: NSView {
     private var bars: [CALayer] = []
     private var isAnimating = false
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
+    init(bars count: Int) {
+        super.init(frame: .zero)
         wantsLayer = true
-        for _ in 0..<3 {
+        for _ in 0..<count {
             let bar = CALayer()
             bar.backgroundColor = NSColor.white.cgColor
             bar.cornerRadius = 1.5
@@ -169,7 +196,7 @@ final class EqualizerNSView: NSView {
                 let animation = CABasicAnimation(keyPath: "transform.scale.y")
                 animation.fromValue = 0.25
                 animation.toValue = 1.0
-                animation.duration = 0.42 + 0.13 * Double(i)
+                animation.duration = 0.42 + 0.13 * Double(i % 4)
                 animation.autoreverses = true
                 animation.repeatCount = .infinity
                 animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)

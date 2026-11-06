@@ -76,7 +76,16 @@ final class IslandViewModel: ObservableObject {
 
     // MARK: плеер
 
-    func startPlayerIfEnabled() { if Settings.playerEnabled { player.start() } }
+    func startPlayerIfEnabled() {
+        // Отладка: показать плеер без настоящей музыки (`--debug-fake-player`) — трек играет от «приложения» topbar.
+        if CommandLine.arguments.contains("--debug-fake-player") {
+            nowPlaying = NowPlaying(title: "Ночной маршрут", artist: "Demo Tape", album: nil, playing: true, duration: 214, elapsed: 83,
+                                    rate: 1, timestamp: Date(), pid: Int(ProcessInfo.processInfo.processIdentifier))
+            updateMediaActive()
+            return
+        }
+        if Settings.playerEnabled { player.start() }
+    }
 
     func setPlayerEnabled(_ on: Bool) {
         Settings.playerEnabled = on
@@ -160,10 +169,25 @@ final class IslandViewModel: ObservableObject {
         nowPlaying = state
     }
 
-    /// Название приложения, откуда играет (Dia, Spotify…).
-    var mediaSourceName: String? {
+    /// Приложение, откуда играет музыка (Dia, Spotify…): по pid; если pid у служебного процесса (браузер, помощник), то
+    /// приложение с окном среди его предков. nil — не нашли.
+    var mediaSourceApp: NSRunningApplication? {
         guard let pid = nowPlaying?.pid, pid > 0 else { return nil }
-        return NSRunningApplication(processIdentifier: pid_t(pid))?.localizedName
+        if let app = NSRunningApplication(processIdentifier: pid_t(pid)), app.activationPolicy != .prohibited, app.bundleIdentifier != nil {
+            return app
+        }
+        guard let id = SessionJumper.windowedAppBundleId(ancestorOf: Int32(pid)) else { return nil }
+        return NSRunningApplication.runningApplications(withBundleIdentifier: id).first
+    }
+
+    var mediaSourceName: String? { mediaSourceApp?.localizedName }
+
+    /// Вывести вперёд приложение-источник музыки и свернуть остров.
+    func openMediaSource() {
+        guard let app = mediaSourceApp else { return }
+        app.unhide()
+        app.activate()
+        collapse()
     }
 
     /// Владелец смотрит на сессию: приложение-хост активно, а для терминалов с точным определением (Ghostty, Terminal, iTerm2) —
@@ -238,7 +262,7 @@ final class IslandViewModel: ObservableObject {
     }
 
     /// Радиус нижних углов: у свёрнутого острова — как у выреза, у раскрытого — мягче.
-    var cornerRadius: CGFloat { presenter.mode == .collapsed ? 11 : 22 }
+    var cornerRadius: CGFloat { presenter.mode == .collapsed ? 11 : 28 }
 
     private func computeSize() -> CGSize {
         let notchH = geometry?.notchHeight ?? 32
@@ -259,7 +283,8 @@ final class IslandViewModel: ObservableObject {
                 .reduce(0) { $0 + max(1, Int(ceil(Double($1.count) / 46.0))) }
             let lines = CGFloat(min(max(estimated, 1), 9))
             let detail = min(max(lines * 16 + 24, 44), 190)
-            return CGSize(width: Self.listWidth, height: notchH + 10 + 44 + 22 + detail + 92 + 24)
+            // Шапка с проектом, ящик с командой (detail), кнопки, ссылки и подпись.
+            return CGSize(width: Self.listWidth, height: notchH + 10 + 28 + detail + 100 + 24)
         }
     }
 

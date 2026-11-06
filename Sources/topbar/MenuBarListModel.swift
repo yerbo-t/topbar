@@ -76,7 +76,8 @@ final class MenuBarListModel: ObservableObject {
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    self.entries = found.filter { $0.width > 0 }
+                    // Свои значки (знак topbar) в списке ни к чему: ими не управляют отсюда.
+                    self.entries = found.filter { $0.width > 0 && $0.bundleId != Bundle.main.bundleIdentifier }
                     for entry in found where self.icons[entry.bundleId] == nil {
                         self.icons[entry.bundleId] = NSRunningApplication.runningApplications(withBundleIdentifier: entry.bundleId).first?.icon
                     }
