@@ -143,8 +143,8 @@
   .island { position: absolute; left: 50%; top: 0; transform: translateX(-50%); width: 19em; height: 2.9em; border-radius: 0 0 1.5em 1.5em; background: #000; color: #fff; overflow: hidden;
             box-shadow: 0 .6em 2em -.6em rgba(0,0,0,.7);
             transition: width .6s cubic-bezier(.16,1,.3,1), height .6s cubic-bezier(.16,1,.3,1), border-radius .6s cubic-bezier(.16,1,.3,1); }
-  .screen[data-scene="sessions"] .island { width: 38em; height: 15.6em; border-radius: 0 0 2.4em 2.4em; }
-  .screen[data-scene="permission"] .island { width: 40em; height: 17.6em; border-radius: 0 0 2.4em 2.4em; }
+  .screen[data-scene="sessions"] .island { width: 42em; height: 17.4em; border-radius: 0 0 2.4em 2.4em; }
+  .screen[data-scene="permission"] .island { width: 48em; height: 23em; border-radius: 0 0 2.4em 2.4em; }
   .screen[data-scene="permission"][data-result="allowed"] .island { height: 9em; width: 33em; }
   .screen[data-scene="player"] .island { width: 38em; height: 12em; border-radius: 0 0 2.4em 2.4em; }
   .screen[data-scene="icons"] .island { width: 33em; }
@@ -158,17 +158,23 @@
 
   .row { display: grid; grid-template-columns: 1.6em 1fr auto; align-items: center; gap: 1em; padding: 1em 1.2em; border-radius: 1.4em; font-size: 1.25em; }
   .row b { font-weight: 650; } .row small { color: #a9abb5; font-size: .88em; }
+  .row > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .row.hot { background: rgba(255,255,255,.08); }
   .s-sessions .row { opacity: 0; transform: translateY(.8em); }
   .screen[data-scene="sessions"] .s-sessions .row { animation: rise .5s cubic-bezier(.2,.9,.3,1) forwards; }
   .screen[data-scene="sessions"] .s-sessions .row:nth-child(1) { animation-delay: .45s; } .screen[data-scene="sessions"] .s-sessions .row:nth-child(2) { animation-delay: .6s; } .screen[data-scene="sessions"] .s-sessions .row:nth-child(3) { animation-delay: .75s; }
 
   .s-permission { padding-top: 3.4em; }
-  .perm-head { display: flex; align-items: center; gap: .9em; font-size: 1.25em; }
-  .perm-head small { color: #a9abb5; margin-left: auto; font-size: .88em; }
-  .cmd { margin: 1em 0; padding: 1em 1.2em; border-radius: 1.2em; background: #111218; border: 1px solid #23252d; font: 1.2em/1.5 var(--mono); color: #dcdde2; }
-  .cmd em { font-style: normal; color: #7aa2ff; }
-  .btns { display: flex; justify-content: flex-end; gap: .9em; }
+  .perm-head { display: flex; align-items: flex-start; gap: .9em; font-size: 1.25em; }
+  .perm-head .dot { margin-top: .3em; }
+  .perm-head .who { display: flex; flex-direction: column; gap: .2em; min-width: 0; }
+  .perm-head small { color: #a9abb5; font-size: .82em; }
+  .ask { margin: 1.2em 0 0; font: 550 1.2em var(--font); color: #f0f0f2; }
+  .why { margin: .3em 0 0; font-size: 1.05em; color: #a9abb5; }
+  .cmd { margin: .9em 0 1.1em; padding: 1em 1.2em; border-radius: 1.2em; background: #111218; border: 1px solid #23252d; font: 1.2em/1.5 var(--mono); color: #dcdde2; }
+  .btns { display: flex; align-items: center; gap: .9em; }
+  .btns .sp { flex: 1; }
+  .qbtn { padding: .8em 1em; border-radius: 1.1em; background: rgba(255,255,255,.06); color: #bdbec6; font: 550 1.05em var(--font); white-space: nowrap; }
   .pbtn { padding: .75em 1.6em; border-radius: 1.1em; border: 1px solid #343642; background: #1a1b21; color: #fff; font: 650 1.25em var(--font); transition: transform .18s, background .2s; }
   .pbtn.go { background: #46c777; border-color: #46c777; color: #04210f; }
   .pbtn.pressed { transform: scale(.93); background: #5fe08e; }
@@ -348,16 +354,18 @@
               <div class="ears"><span><i class="dot work"></i>2</span><span><i class="dot wait"></i>1</span></div>
 
               <div class="scene s-sessions">
-                <div class="row hot"><i class="dot wait"></i><span><b>web-app</b> <small>· main</small></span><small>ждёт ответа</small></div>
-                <div class="row"><i class="dot work"></i><span><b>api-server</b> <small>· fix/e2e</small></span><small>работает · 2 мин</small></div>
-                <div class="row"><i class="dot done"></i><span><b>docs</b> <small>· main</small></span><small>готово</small></div>
+                <div class="row hot"><i class="dot wait"></i><span><b>Форма входа</b> <small>web-app</small></span><small>ждёт ответа</small></div>
+                <div class="row"><i class="dot work"></i><span><b>Починить e2e-тест</b> <small>api-server</small></span><small>работает · 2 мин</small></div>
+                <div class="row"><i class="dot done"></i><span><b>Обновить README</b> <small>docs</small></span><small>готово</small></div>
               </div>
 
               <div class="scene s-permission">
                 <div class="perm-body">
-                  <div class="perm-head"><i class="dot wait"></i><b>api-server</b><small>fix/e2e · просит разрешение</small></div>
-                  <div class="cmd"><em>Bash</em>  npm run test:e2e</div>
-                  <div class="btns"><span class="pbtn">Отклонить</span><span class="pbtn go" id="allow">Разрешить</span></div>
+                  <div class="perm-head"><i class="dot wait"></i><span class="who"><b>Починить e2e-тест</b><small>api-server · fix/e2e · Ghostty</small></span></div>
+                  <p class="ask">Разрешить выполнить команду?</p>
+                  <p class="why">Запустить e2e-тесты</p>
+                  <div class="cmd">npm run test:e2e</div>
+                  <div class="btns"><span class="qbtn">Открыть в Ghostty</span><span class="qbtn">Позже</span><span class="sp"></span><span class="pbtn">Отклонить</span><span class="pbtn go" id="allow">Разрешить</span></div>
                 </div>
                 <div class="perm-ok"><svg viewBox="0 0 24 24" fill="none" stroke="#46c777" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Разрешено. Claude продолжает</div>
               </div>
