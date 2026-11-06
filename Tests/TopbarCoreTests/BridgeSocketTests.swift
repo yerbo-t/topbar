@@ -84,6 +84,33 @@ final class BridgeSocketTests: XCTestCase {
         XCTAssertEqual(decision["message"] as? String, "нельзя")
     }
 
+    func testAnsweredReplyAddsAnswersToTheOriginalToolInput() throws {
+        let path = Fx.socketPath()
+        let q = DispatchQueue(label: "t")
+        let server = SocketServer(path: path, queue: q) { _, ch in ch.send(.ack); ch.send(.answered(["Цвет?": "Красный"])) }
+        XCTAssertNoThrow(try server.start())
+        defer { server.stop() }
+        var event: [String: Any] = ["hook_event_name": "PermissionRequest", "session_id": "s1", "cwd": "/work/topbar", "tool_name": "AskUserQuestion"]
+        event["tool_input"] = ["questions": [["question": "Цвет?", "options": [["label": "Красный"], ["label": "Синий"]]]]]
+        let out = try XCTUnwrap(run(try JSONSerialization.data(withJSONObject: event), path: path))
+        let obj = try JSONSerialization.jsonObject(with: out) as! [String: Any]
+        let decision = (obj["hookSpecificOutput"] as! [String: Any])["decision"] as! [String: Any]
+        XCTAssertEqual(decision["behavior"] as? String, "allow")
+        let updated = decision["updatedInput"] as! [String: Any]
+        XCTAssertEqual(updated["answers"] as? [String: String], ["Цвет?": "Красный"])
+        XCTAssertNotNil(updated["questions"])
+    }
+
+    func testAnsweredReplyWithoutToolInputMeansNoDecision() {
+        let path = Fx.socketPath()
+        let q = DispatchQueue(label: "t")
+        let server = SocketServer(path: path, queue: q) { _, ch in ch.send(.ack); ch.send(.answered(["Цвет?": "Красный"])) }
+        XCTAssertNoThrow(try server.start())
+        defer { server.stop() }
+        let event: [String: Any] = ["hook_event_name": "PermissionRequest", "session_id": "s1", "cwd": "/work/topbar", "tool_name": "AskUserQuestion"]
+        XCTAssertNil(run(try! JSONSerialization.data(withJSONObject: event), path: path))
+    }
+
     func testNoneReplyMeansNoOutput() {
         let path = Fx.socketPath()
         let q = DispatchQueue(label: "t")

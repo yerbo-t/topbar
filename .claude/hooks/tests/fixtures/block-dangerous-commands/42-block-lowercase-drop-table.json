@@ -1,0 +1,12 @@
+{
+  "name": "block lowercase drop table",
+  "stdin": {
+    "tool_input": {
+      "command": "sqlite3 x.db \"drop table installs\""
+    }
+  },
+  "expect_exit": 2,
+  "expect_stdout_contains": [
+    "deny"
+  ]
+}

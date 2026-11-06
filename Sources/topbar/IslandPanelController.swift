@@ -40,11 +40,24 @@ final class IslandPanelController {
         timer.tolerance = 1
         RunLoop.main.add(timer, forMode: .common)
         spaceTimer = timer
+        // Другое приложение — другие меню слева от выреза: место перемеряем сразу, не дожидаясь таймера.
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                MainActor.assumeIsolated {
+                    guard let self, self.model.mode == .collapsed else { return }
+                    if self.model.refreshMenuBarSpace(force: true, immediate: true) { self.layout() }
+                }
+            }
+        }
     }
 
     private var spaceTimer: Timer?
+    private var activationObserver: NSObjectProtocol?
 
     private var settleWork: DispatchWorkItem?
+    private var hideCheck: DispatchWorkItem?
     private let spring = Animation.spring(response: 0.36, dampingFraction: 0.84)
 
     /// Пересчитать окно по текущему состоянию. Остров «вырастает из выреза»: окно на время перехода покрывает и старую, и новую
@@ -56,6 +69,17 @@ final class IslandPanelController {
         model.recomputeLayout()
         settleWork?.cancel()
         guard let geometry = model.geometry, model.mode != .hidden else {
+            // Экран с вырезом на миг пропадает из списка при переходе между столами: остров сразу не прячем, а проверяем снова.
+            if model.geometry == nil, model.mode != .hidden, panel.isVisible {
+                hideCheck?.cancel()
+                let check = DispatchWorkItem { [weak self] in
+                    guard let self, NotchGeometry.find() == nil else { return }
+                    self.hide()
+                }
+                hideCheck = check
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: check)
+                return
+            }
             hide()
             return
         }

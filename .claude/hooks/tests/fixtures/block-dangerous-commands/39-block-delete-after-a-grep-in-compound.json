@@ -1,0 +1,12 @@
+{
+  "name": "block delete after a grep in compound",
+  "stdin": {
+    "tool_input": {
+      "command": "grep -c x a.txt; sqlite3 x.db \"delete from installs\""
+    }
+  },
+  "expect_exit": 2,
+  "expect_stdout_contains": [
+    "deny"
+  ]
+}

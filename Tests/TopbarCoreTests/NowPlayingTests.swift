@@ -67,4 +67,27 @@ final class NowPlayingTests: XCTestCase {
         XCTAssertEqual(p.mode, .hidden)
         XCTAssertFalse(p.listOpen)
     }
+
+    // MARK: обложка при паузе и «играть»
+
+    func testClearOfArtworkForTheSameTrackIsIgnored() {
+        let a = NowPlaying(title: "Ночной маршрут", artist: "Demo Tape", album: "A", playing: true)
+        let paused = NowPlaying(title: "Ночной маршрут", artist: "Demo Tape", album: "A", playing: false)
+        XCTAssertEqual(ArtworkUpdate.cleared.ignoringTransientClear(previous: a, current: paused), .unchanged,
+                       "пауза на миг убрала обложку у того же трека — не применяем")
+    }
+
+    func testClearOfArtworkForANewTrackIsApplied() {
+        let a = NowPlaying(title: "Ночной маршрут", artist: "Demo Tape", playing: true)
+        let b = NowPlaying(title: "Другая песня", artist: "Demo Tape", playing: true)
+        XCTAssertEqual(ArtworkUpdate.cleared.ignoringTransientClear(previous: a, current: b), .cleared)
+        XCTAssertEqual(ArtworkUpdate.cleared.ignoringTransientClear(previous: nil, current: b), .cleared)
+    }
+
+    func testOtherArtworkUpdatesPassThrough() {
+        let a = NowPlaying(title: "T", playing: true)
+        let data = ArtworkUpdate.data(Data([1, 2, 3]))
+        XCTAssertEqual(data.ignoringTransientClear(previous: a, current: a), data)
+        XCTAssertEqual(ArtworkUpdate.unchanged.ignoringTransientClear(previous: a, current: a), .unchanged)
+    }
 }

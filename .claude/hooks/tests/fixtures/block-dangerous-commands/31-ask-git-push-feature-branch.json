@@ -1,0 +1,12 @@
+{
+  "name": "ask git push feature branch",
+  "stdin": {
+    "tool_input": {
+      "command": "git push origin feat/next"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_contains": [
+    "\"ask\""
+  ]
+}

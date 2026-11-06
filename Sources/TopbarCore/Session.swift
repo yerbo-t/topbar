@@ -37,8 +37,15 @@ public struct PermissionRequest: Equatable, Sendable {
     /// `tool_use_id` вызова, если удалось привязать запрос к `PreToolUse`.
     public let toolUseId: String?
     public let receivedAt: Date
-    /// false — вопросы вроде `AskUserQuestion`: сессия «ждёт», но кнопок «разрешить/отклонить» нет.
+    /// false — вопросы и планы (`ExitPlanMode`, а также `AskUserQuestion`, которого остров не умеет показать): сессия «ждёт»,
+    /// но карточки нет, ответ — в терминале.
     public let cardable: Bool
+    /// Вопрос карточки целиком: «Разрешить выполнить команду?».
+    public var question: String = ""
+    /// Пояснение к запросу: что Claude написал о команде (`description` у Bash), путь файла, запрос поиска.
+    public var purpose: String? = nil
+    /// Вопросы Claude с вариантами (`AskUserQuestion`), если остров их умеет показать: на них отвечают кнопками на карточке.
+    public var questions: [AskQuestion]? = nil
 }
 
 public struct Session: Equatable, Sendable {
@@ -61,6 +68,10 @@ public struct Session: Equatable, Sendable {
     public var running: [RunningTool]
     public var unseenDone: Bool
     public var queue: [PermissionRequest]
+    /// Журнал сессии, из которого читается её имя.
+    public var transcriptPath: String? = nil
+    /// Имя сессии: заданное владельцем (`/rename`) или придуманное Claude Code; nil — пока нет.
+    public var name: String? = nil
 
     public var toolRunning: Bool { !running.isEmpty }
 
@@ -69,7 +80,7 @@ public struct Session: Equatable, Sendable {
         sessionId == other.sessionId && project == other.project && projectRoot == other.projectRoot
             && branch == other.branch && status == other.status && currentAction == other.currentAction
             && hostApp == other.hostApp && hostBundleId == other.hostBundleId && tty == other.tty && permissionMode == other.permissionMode
-            && unseenDone == other.unseenDone
+            && unseenDone == other.unseenDone && name == other.name
             && queue.map(\.requestId) == other.queue.map(\.requestId)
     }
 
@@ -87,9 +98,12 @@ public struct Summary: Equatable, Sendable {
     public var top: SessionStatus?
 }
 
-/// Какие инструменты остров не превращает в карточку: кнопки «разрешить/отклонить» для них бессмысленны.
+/// Какие инструменты остров не превращает в карточку «разрешить/отклонить»: для них эти кнопки бессмысленны.
+/// У `AskUserQuestion` своя карточка с вариантами ответа (когда вопрос остров умеет показать, см. `AskQuestions`).
 public enum PermissionPolicy {
-    public static let passthroughTools: Set<String> = ["AskUserQuestion", "ExitPlanMode"]
+    /// Инструмент, которым Claude Code задаёт вопрос с вариантами.
+    public static let questionTool = "AskUserQuestion"
+    public static let passthroughTools: Set<String> = [questionTool, "ExitPlanMode"]
 
     public static func intercepts(toolName: String?) -> Bool {
         guard let toolName else { return true }
@@ -108,6 +122,10 @@ public enum ActionDescriber {
             let path = input?["file_path"]?.stringValue ?? input?["notebook_path"]?.stringValue ?? ""
             let name = (path as NSString).lastPathComponent
             return name.isEmpty ? toolName : "\(toolName) \(name)"
+        case PermissionPolicy.questionTool:
+            return "Задаёт вопрос"
+        case "ExitPlanMode":
+            return "Ждёт решения по плану"
         default:
             return toolName
         }
@@ -118,6 +136,10 @@ public enum ActionDescriber {
         var text: String
         if toolName == "Bash", let command = input?["command"]?.stringValue {
             text = command
+        } else if let change = editDiff(toolName: toolName, input: input) {
+            text = change
+        } else if toolName == "Write", let content = input?["content"]?.stringValue {
+            text = content.isEmpty ? "(пустой файл)" : content
         } else if let input, let data = try? Self.encoder.encode(input) {
             text = String(decoding: data, as: UTF8.self)
         } else {
@@ -125,6 +147,81 @@ public enum ActionDescriber {
         }
         if text.count > limit { text = String(text.prefix(limit)) + "\n… показано не всё" }
         return text
+    }
+
+    /// Правка файла как разница: строки «- было», «+ станет» (путь — в пояснении под вопросом). nil — не правка.
+    static func editDiff(toolName: String?, input: JSONValue?) -> String? {
+        func one(_ edit: JSONValue?) -> String? {
+            guard let old = edit?["old_string"]?.stringValue, let new = edit?["new_string"]?.stringValue else { return nil }
+            func mark(_ text: String, _ sign: String) -> String {
+                text.split(separator: "\n", omittingEmptySubsequences: false).map { sign + " " + $0 }.joined(separator: "\n")
+            }
+            var parts = [old.isEmpty ? nil : mark(old, "-"), new.isEmpty ? nil : mark(new, "+")].compactMap { $0 }
+            if case .bool(true)? = edit?["replace_all"] { parts.append("(во всех местах файла)") }
+            return parts.joined(separator: "\n")
+        }
+        switch toolName {
+        case "Edit": return one(input)
+        case "MultiEdit":
+            guard case .array(let edits)? = input?["edits"] else { return nil }
+            let all = edits.compactMap { one($0) }
+            return all.isEmpty ? nil : all.joined(separator: "\n\n")
+        default: return nil
+        }
+    }
+
+    /// Вопрос карточки: что именно владелец разрешает, словами, а не именем инструмента.
+    public static func question(toolName: String?, input: JSONValue?) -> String {
+        let name = toolName ?? ""
+        let file = fileName(input)
+        switch name {
+        case "Bash": return "Разрешить выполнить команду?"
+        case "Edit", "MultiEdit": return file.map { "Разрешить изменить файл \($0)?" } ?? "Разрешить изменить файл?"
+        case "Write": return file.map { "Разрешить записать файл \($0)?" } ?? "Разрешить записать файл?"
+        case "Read": return file.map { "Разрешить прочитать файл \($0)?" } ?? "Разрешить прочитать файл?"
+        case "NotebookEdit": return file.map { "Разрешить изменить блокнот \($0)?" } ?? "Разрешить изменить блокнот?"
+        case "WebFetch":
+            let host = input?["url"]?.stringValue.flatMap { URL(string: $0)?.host }
+            return host.map { "Разрешить открыть страницу \($0)?" } ?? "Разрешить открыть страницу?"
+        case "WebSearch": return "Разрешить поиск в интернете?"
+        case "Glob", "Grep": return "Разрешить поиск по файлам?"
+        case "Task", "Agent": return "Разрешить запустить субагента?"
+        case "Skill":
+            return input?["skill"]?.stringValue.map { "Разрешить запустить навык \($0)?" } ?? "Разрешить запустить навык?"
+        case "KillShell", "KillBash": return "Разрешить остановить фоновую команду?"
+        default:
+            // mcp__<сервер>__<инструмент>
+            let parts = name.components(separatedBy: "__")
+            if parts.count >= 3, parts[0] == "mcp" {
+                return "Разрешить \(parts[2...].joined(separator: "__")) из \(parts[1])?"
+            }
+            return name.isEmpty ? "Разрешить?" : "Разрешить инструмент \(name)?"
+        }
+    }
+
+    /// Пояснение под вопросом карточки (nil — пояснять нечего, всё видно в самом запросе).
+    public static func purpose(toolName: String?, input: JSONValue?) -> String? {
+        let text: String?
+        switch toolName {
+        case "Bash", "Task", "Agent": text = input?["description"]?.stringValue
+        case "Edit", "MultiEdit", "Write", "Read", "NotebookEdit":
+            text = (input?["file_path"]?.stringValue ?? input?["notebook_path"]?.stringValue).map(abbreviateHome)
+        case "WebSearch": text = input?["query"]?.stringValue
+        default: text = nil
+        }
+        guard let line = text.map({ oneLine($0, limit: 200) })?.trimmingCharacters(in: .whitespaces), !line.isEmpty else { return nil }
+        return line
+    }
+
+    private static func fileName(_ input: JSONValue?) -> String? {
+        let path = input?["file_path"]?.stringValue ?? input?["notebook_path"]?.stringValue ?? ""
+        let name = (path as NSString).lastPathComponent
+        return name.isEmpty ? nil : name
+    }
+
+    private static func abbreviateHome(_ path: String) -> String {
+        let home = NSHomeDirectory()
+        return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
     }
 
     /// Отпечаток ввода для связи `PermissionRequest` ↔ `PreToolUse`.

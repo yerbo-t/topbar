@@ -1,0 +1,12 @@
+{
+  "name": "allow rmdir of a release folder",
+  "stdin": {
+    "tool_input": {
+      "command": "rmdir release/0.2.0"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_not_contains": [
+    "permissionDecision"
+  ]
+}

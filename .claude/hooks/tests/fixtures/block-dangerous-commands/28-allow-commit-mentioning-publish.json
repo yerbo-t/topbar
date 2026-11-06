@@ -1,0 +1,12 @@
+{
+  "name": "allow commit mentioning publish",
+  "stdin": {
+    "tool_input": {
+      "command": "git commit -m \"docs: how scripts/publish.sh works\""
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_not_contains": [
+    "ask"
+  ]
+}

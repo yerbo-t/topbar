@@ -35,9 +35,10 @@ public final class SessionHub {
         staleToolAfter: TimeInterval = 20,
         callbackQueue: DispatchQueue = DispatchQueue(label: "topbar.hub.callbacks"),
         branchProvider: @escaping (String) -> String? = BranchReader.branch(at:),
+        nameProvider: @escaping (String) -> String? = SessionNameReader().name(at:),
         hasChildProcess: @escaping (Session) -> Bool = { $0.pid <= 0 || !ProcessProbe.childPids(of: $0.pid).isEmpty }
     ) {
-        self.store = SessionStore(branchProvider: branchProvider)
+        self.store = SessionStore(branchProvider: branchProvider, nameProvider: nameProvider)
         self.livenessInterval = livenessInterval
         self.staleToolAfter = staleToolAfter
         self.callbackQueue = callbackQueue
@@ -76,6 +77,29 @@ public final class SessionHub {
                 return
             }
             let delivered = channel.send(allow ? .allow() : .deny(denyMessage))
+            if delivered {
+                store.resolve(requestId: requestId)
+                notifyChange()
+            } else {
+                emit { self.onRequestClosed?(requestId) }
+            }
+            emit { completion?(delivered) }
+        }
+    }
+
+    /// Ответ владельца на вопрос Claude с карточки (вопрос → выбранные подписи вариантов). Выбор проверяется по самим вопросам
+    /// запроса; не подошёл — `completion(false)`, карточка остаётся. Остальное — как у `decide`.
+    public func answer(requestId: String, picks: [String: [String]], completion: ((Bool) -> Void)? = nil) {
+        queue.async { [self] in
+            guard channels[requestId] != nil,
+                  let request = store.sessions.values.lazy.compactMap({ $0.queue.first { $0.requestId == requestId } }).first,
+                  let questions = request.questions,
+                  let answers = AskQuestions.answers(from: picks, for: questions),
+                  let channel = channels.removeValue(forKey: requestId) else {
+                emit { completion?(false) }
+                return
+            }
+            let delivered = channel.send(.answered(answers))
             if delivered {
                 store.resolve(requestId: requestId)
                 notifyChange()

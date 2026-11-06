@@ -1,0 +1,12 @@
+{
+  "name": "allow docker run of the service",
+  "stdin": {
+    "tool_input": {
+      "command": "docker run --rm -v topbar-data:/data -p 3000:3000 topbar-installs"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_not_contains": [
+    "permissionDecision"
+  ]
+}

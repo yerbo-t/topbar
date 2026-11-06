@@ -207,6 +207,67 @@ final class SessionHubTests: XCTestCase {
         XCTAssertEqual(hub.snapshot().first?.status, .waitingPermission, "сессия ждёт вас, просто без кнопок")
     }
 
+    static let colorQuestion: [String: Any] = [
+        "questions": [[
+            "question": "Какой цвет?", "header": "Цвет", "multiSelect": false,
+            "options": [["label": "Красный", "description": "Тёплый"], ["label": "Синий", "description": "Холодный"]],
+        ]]
+    ]
+
+    func testAnswerFromTheCardReachesBridgeAsUpdatedInput() throws {
+        let path = Fx.socketPath()
+        let hub = makeHub(path: path)
+        hub.onRequestOpened = { req, _ in hub.answer(requestId: req.requestId, picks: ["Какой цвет?": ["Синий"]]) }
+        try hub.start()
+        defer { hub.stop() }
+        let out = bridge(hook("PermissionRequest", tool: "AskUserQuestion", input: Self.colorQuestion), path: path)
+        XCTAssertEqual(decision(out), "allow")
+        let obj = try JSONSerialization.jsonObject(with: try XCTUnwrap(out)) as! [String: Any]
+        let updated = ((obj["hookSpecificOutput"] as! [String: Any])["decision"] as! [String: Any])["updatedInput"] as! [String: Any]
+        XCTAssertEqual(updated["answers"] as? [String: String], ["Какой цвет?": "Синий"])
+        XCTAssertEqual((updated["questions"] as? [[String: Any]])?.count, 1, "исходные вопросы остаются во вводе")
+        hub.flush()
+        XCTAssertEqual(hub.snapshot().first?.status, .working)
+    }
+
+    func testAnswerThatDoesNotFitTheQuestionIsRejectedAndCardStays() throws {
+        let path = Fx.socketPath()
+        let hub = makeHub(path: path)
+        let rejected = expectation(description: "rejected")
+        var result: Bool?
+        hub.onRequestOpened = { req, _ in
+            hub.answer(requestId: req.requestId, picks: ["Какой цвет?": ["Жёлтый"]]) { ok in
+                result = ok
+                // Карточка жива: теперь отвечаем правильно.
+                hub.answer(requestId: req.requestId, picks: ["Какой цвет?": ["Красный"]]) { _ in rejected.fulfill() }
+            }
+        }
+        try hub.start()
+        defer { hub.stop() }
+        let out = bridge(hook("PermissionRequest", tool: "AskUserQuestion", input: Self.colorQuestion), path: path)
+        wait(for: [rejected], timeout: 3)
+        XCTAssertEqual(result, false)
+        XCTAssertEqual(decision(out), "allow", "мост дождался верного ответа")
+    }
+
+    func testAnswerToARequestThatIsNotAQuestionIsRejected() throws {
+        let path = Fx.socketPath()
+        let hub = makeHub(path: path)
+        let answered = expectation(description: "answered")
+        var result: Bool?
+        hub.onRequestOpened = { req, _ in
+            hub.answer(requestId: req.requestId, picks: ["Что-то?": ["Да"]]) { ok in
+                result = ok
+                hub.decide(requestId: req.requestId, allow: false) { _ in answered.fulfill() }
+            }
+        }
+        try hub.start()
+        defer { hub.stop() }
+        _ = bridge(hook("PermissionRequest", tool: "Bash"), path: path)
+        wait(for: [answered], timeout: 3)
+        XCTAssertEqual(result, false)
+    }
+
     func testUnattendedSessionsAreIgnoredCompletely() throws {
         let path = Fx.socketPath()
         let hub = makeHub(path: path)

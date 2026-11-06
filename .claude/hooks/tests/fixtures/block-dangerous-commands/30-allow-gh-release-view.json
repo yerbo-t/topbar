@@ -1,0 +1,12 @@
+{
+  "name": "allow gh release view",
+  "stdin": {
+    "tool_input": {
+      "command": "gh release view v0.2.3"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_not_contains": [
+    "ask"
+  ]
+}

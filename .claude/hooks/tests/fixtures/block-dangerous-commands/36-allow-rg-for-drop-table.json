@@ -1,0 +1,12 @@
+{
+  "name": "allow rg for DROP TABLE",
+  "stdin": {
+    "tool_input": {
+      "command": "rg -n \"DROP TABLE\" server"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_not_contains": [
+    "permissionDecision"
+  ]
+}

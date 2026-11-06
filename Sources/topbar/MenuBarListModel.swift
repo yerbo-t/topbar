@@ -21,6 +21,7 @@ final class MenuBarListModel: ObservableObject {
     /// Показать меню приложения (кнопка «Меню» в подвале).
     var onShowMenu: (() -> Void)?
     var onClose: (() -> Void)?
+    private var refreshedAt = Date.distantPast
     /// Есть новая версия приложения (nil — нет) и что сделать по кнопке «Обновить».
     @Published var updateVersion: String?
     var onUpdate: (() -> Void)?
@@ -53,7 +54,14 @@ final class MenuBarListModel: ObservableObject {
         }
     }
 
+    /// Значок самого topbar или системный: такие в список не попадают.
+    static func isSystemOrOwn(_ bundleId: String) -> Bool {
+        bundleId == Bundle.main.bundleIdentifier || bundleId.hasPrefix("com.apple.")
+    }
+
     var sections: MenuBarSections { MenuBarOrdering.sections(entries, prefs: prefs) }
+    /// Закреплённые значки для ряда на острове (без доступа к строке меню значков нет — ряда тоже).
+    var pinnedRow: [MenuBarEntry] { trusted ? MenuBarOrdering.pinnedRow(entries, prefs: prefs) : [] }
     /// В строке меню этих значков сейчас не видно (под вырезом или спрятаны кнопкой сворачивания).
     var notVisibleCount: Int { entries.filter { $0.visibility != .visible }.count }
 
@@ -67,6 +75,12 @@ final class MenuBarListModel: ObservableObject {
             if hiddenExpanded { height += CGFloat(s.hidden.count) * MenuBarListView.rowHeight }
         }
         return height
+    }
+
+    /// Для острова: значки подгружаются, когда раскрывается список, но не чаще раза в три секунды (наведение раскрывает его часто).
+    func refreshIfStale() {
+        guard !loading, Date().timeIntervalSince(refreshedAt) > 3 else { return }
+        refresh()
     }
 
     func refresh() {
@@ -85,14 +99,16 @@ final class MenuBarListModel: ObservableObject {
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    // Свои значки (знак topbar) в списке ни к чему: ими не управляют отсюда.
-                    self.entries = found.filter { $0.width > 0 && $0.bundleId != Bundle.main.bundleIdentifier }
+                    // В списке только значки обычных приложений. Свои (знак topbar) и системные (часы, батарея, Wi-Fi, «Пункт
+                    // управления», раскладка, пароли Apple) не показываем: прятать их нельзя, а в списке они только путали бы.
+                    self.entries = found.filter { $0.width > 0 && !Self.isSystemOrOwn($0.bundleId) }
                     self.knownApps.formUnion(found.map(\.bundleId))
                     UserDefaults.standard.set(Array(self.knownApps), forKey: Self.knownAppsKey)
                     for entry in found where self.icons[entry.bundleId] == nil {
                         self.icons[entry.bundleId] = NSRunningApplication.runningApplications(withBundleIdentifier: entry.bundleId).first?.icon
                     }
                     self.loading = false
+                    self.refreshedAt = Date()   // три секунды — от прихода результата, а не от начала запроса
                 }
             }
         }
@@ -149,7 +165,7 @@ final class MenuBarListModel: ObservableObject {
     }
 
     /// Нажать значок. Спрятанный кнопкой сворачивания — сначала показать значки; не помещённый системой — объяснить.
-    func press(_ entry: MenuBarEntry) {
+    func press(_ entry: MenuBarEntry, onSuccess: (() -> Void)? = nil) {
         message = nil
         markUsed(entry.id)
         if entry.visibility == .pushedOff, let hider, hider.isCollapsed { hider.setCollapsed(false) }
@@ -161,7 +177,7 @@ final class MenuBarListModel: ObservableObject {
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         guard let self else { return }
-                        if ok { self.onClose?(); return }
+                        if ok { self.onClose?(); onSuccess?(); return }
                         self.message = switch visibility {
                         case .underNotch: "Система сейчас не показывает этот значок: правее выреза не хватает места. Освободите место — закройте приложение или спрячьте значки."
                         case .pushedOff: "Значок остаётся за краем экрана. Разверните значки кнопкой внизу списка."

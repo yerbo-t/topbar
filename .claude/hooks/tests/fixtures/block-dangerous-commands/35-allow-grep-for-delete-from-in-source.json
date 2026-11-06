@@ -1,0 +1,12 @@
+{
+  "name": "allow grep for DELETE FROM in source",
+  "stdin": {
+    "tool_input": {
+      "command": "grep -n \"DELETE FROM\" server/src/store.ts"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_not_contains": [
+    "permissionDecision"
+  ]
+}

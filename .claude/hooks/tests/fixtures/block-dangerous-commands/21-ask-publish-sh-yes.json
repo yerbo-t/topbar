@@ -1,0 +1,12 @@
+{
+  "name": "ask publish.sh --yes",
+  "stdin": {
+    "tool_input": {
+      "command": "scripts/publish.sh --yes"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_contains": [
+    "\"ask\""
+  ]
+}

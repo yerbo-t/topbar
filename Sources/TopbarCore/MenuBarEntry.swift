@@ -103,6 +103,14 @@ public struct MenuBarSections: Equatable, Sendable {
 }
 
 public enum MenuBarOrdering {
+    /// Сколько закреплённых значков показывает ряд на острове.
+    public static let pinnedRowLimit = 8
+
+    /// Ряд закреплённых значков на острове: те, что сейчас есть в строке меню, в порядке владельца, не больше `pinnedRowLimit`.
+    public static func pinnedRow(_ entries: [MenuBarEntry], prefs: MenuBarPrefs) -> [MenuBarEntry] {
+        Array(sections(entries, prefs: prefs).pinned.prefix(pinnedRowLimit))
+    }
+
     /// Закреплённые — в порядке владельца; остальные — кто последним был в работе (нажат в списке или его приложение стало
     /// активным) выше, у кого истории нет — после них справа налево, как значки лежат в строке меню; скрытые — отдельно.
     /// Ключ, которого сейчас нет среди значков, пропускается; закреплённое важнее скрытого, если в данных оба признака.

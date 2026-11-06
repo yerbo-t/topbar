@@ -156,6 +156,42 @@ final class IslandPresenterTests: XCTestCase {
         XCTAssertGreaterThan(e.leftWidth, 36)
     }
 
+    // MARK: меню приложения слева от выреза
+
+    func testLeftEarShrinksBeforeAppMenus() {
+        let one = [chip(.working, 4, "работает")]
+        let full = EarLayout.make(chips: one, availableLeft: nil, availableRight: nil, measure: fixedMeasure)
+        XCTAssertEqual(full.style, .full)
+        let tight = EarLayout.make(chips: one, availableLeft: full.leftWidth - 1, availableRight: nil, measure: fixedMeasure)
+        XCTAssertEqual(tight.style, .compact, "«● 4» вместо «● 4 работает», чтобы не накрыть меню")
+        XCTAssertLessThanOrEqual(tight.leftWidth, full.leftWidth - 1)
+    }
+
+    func testSingleChipMovesRightWhenMenusReachTheNotch() {
+        let e = EarLayout.make(chips: [chip(.working, 4, "работает")], availableLeft: 4, availableRight: 200, measure: fixedMeasure)
+        XCTAssertEqual(e.leftWidth, 0, "левое ухо не заходит на меню")
+        XCTAssertEqual(e.right.count, 1)
+        XCTAssertEqual(e.style, .full)
+    }
+
+    func testTwoChipsRespectBothSides() {
+        let chips = [chip(.waitingPermission, 1, "ждёт"), chip(.working, 2, "работает")]
+        let e = EarLayout.make(chips: chips, availableLeft: 40, availableRight: 300, measure: fixedMeasure)
+        XCTAssertLessThanOrEqual(e.leftWidth, 40)
+        XCTAssertEqual(e.style, .compact)
+        let none = EarLayout.make(chips: chips, availableLeft: 0, availableRight: 300, measure: fixedMeasure)
+        XCTAssertEqual(none.leftWidth, 0)
+        XCTAssertEqual(none.right.count, 2, "слева места нет совсем — всё в правом ухе")
+    }
+
+    func testBothSidesTightPutsCountsWhereThereIsMoreRoom() {
+        let chips = [chip(.waitingPermission, 1, "ждёт"), chip(.working, 2, "работает")]
+        let e = EarLayout.make(chips: chips, availableLeft: 10, availableRight: 20, measure: fixedMeasure)
+        XCTAssertEqual(e.style, .merged)
+        XCTAssertEqual(e.leftWidth, 0)
+        XCTAssertEqual(e.right.count, 2)
+    }
+
     func testWatchPolicyComparesTerminalWhenKnown() {
         var s = session("a", .working, host: "Ghostty")
         s.tty = "ttys004"

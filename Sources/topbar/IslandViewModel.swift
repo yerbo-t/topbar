@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import TopbarCore
 
@@ -14,7 +15,8 @@ struct ShapeRect: Equatable {
 @MainActor
 final class IslandViewModel: ObservableObject {
     private(set) var presenter = IslandPresenter()
-    @Published private(set) var titles: [String: String] = [:]
+    /// Подписи сессий: крупно имя сессии (или проект), мелко проект и ветка.
+    @Published private(set) var labels: [String: SessionLabel] = [:]
     /// Что играет в системе (nil — ничего) и обложка; положение в треке считает вид сам.
     @Published private(set) var nowPlaying: NowPlaying?
     private var sourceCache: (pid: Int, app: NSRunningApplication?)?
@@ -26,16 +28,45 @@ final class IslandViewModel: ObservableObject {
     @Published var shape = ShapeRect(x: 0, width: 0, height: 0, radius: 11)
     /// Размеры считаются один раз на изменение (замер текста не должен повторяться при каждой перерисовке).
     private(set) var size: CGSize = .zero
-    /// Раскладка «ушей» свёрнутого острова: подстраивается под свободное место до значков справа от выреза.
+    /// Раскладка «ушей» свёрнутого острова: подстраивается под свободное место до меню приложения слева и до значков справа.
     private(set) var ears = EarLayout(style: .full, left: [], right: [], leftWidth: 110, rightWidth: 110)
-    /// Свободное место между вырезом и первым значком справа (nil — значков нет или не удалось узнать).
-    private var availableRight: CGFloat?
+    /// Свободное место по сторонам выреза: слева — до последнего меню приложения, справа — до первого значка
+    /// (nil — места вдоволь или не удалось узнать).
+    private var space = Space(left: nil, right: nil)
+    private var availableRight: CGFloat? { space.right }
     private var spaceCheckedAt = Date.distantPast
+    /// Переход между столами и экранами: пока идёт, значки в строке меню перекладываются и замеру места верить нельзя.
+    private var spaceFrozenUntil = Date.distantPast
+    /// Новое значение свободного места принимается, когда два замера подряд его подтвердили (мигание на переходах отсекается).
+    private var pendingFree: (value: Space, seen: Int)?
+    private var hasMeasuredSpace = false
     private var pendingSessions: [Session]?
     private var flushTask: Task<Void, Never>?
     /// Список раскрыт кликом (остаётся, пока владелец не свернёт); наведением раскрывается временно.
     private var pinned = false
     private var hoverTask: Task<Void, Never>?
+
+    /// Ответ на вопрос Claude, который набирается на карточке: какой вопрос по счёту и что уже выбрано.
+    struct AskDraft: Equatable {
+        var requestId: String?
+        var index = 0
+        var picks: [String: [String]] = [:]
+        /// Ответ уже отправлен хабу: повторные нажатия, пока карточка не закрылась, игнорируются.
+        var sending = false
+    }
+    private(set) var ask = AskDraft()
+
+    /// Значки строки меню: из них собирается ряд закреплённых над списком сессий (nil — не подключено).
+    var icons: MenuBarListModel? {
+        didSet {
+            iconsObserver = icons?.objectWillChange.sink { [weak self] _ in
+                // Изменение приходит до того, как значения обновились: пересчёт — на следующем обороте.
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.iconsChanged() } }
+            }
+        }
+    }
+    private var iconsObserver: AnyCancellable?
+    private var lastPinnedRowCount = 0
 
     let hub: SessionHub
     let system: SystemState
@@ -109,7 +140,7 @@ final class IslandViewModel: ObservableObject {
     private func handle(_ message: NowPlayingMessage) {
         switch message {
         case .state(let state, let art):
-            applyArtwork(art)
+            applyArtwork(art.ignoringTransientClear(previous: nowPlaying, current: state))
             let justPaused = (nowPlaying?.playing ?? false) && !state.playing
             nowPlaying = state
             if state.playing { pausedSince = nil } else if justPaused || pausedSince == nil { pausedSince = Date() }
@@ -211,6 +242,11 @@ final class IslandViewModel: ObservableObject {
 
     var mode: IslandMode { presenter.mode }
 
+    /// Подпись сессии для вида; пока подписи не посчитаны — проект и ветка.
+    func label(for session: Session) -> SessionLabel {
+        labels[session.sessionId] ?? SessionLabel(title: session.name ?? session.project, project: session.name == nil ? nil : session.project, branch: session.branch)
+    }
+
 
     // MARK: размеры
 
@@ -226,40 +262,71 @@ final class IslandViewModel: ObservableObject {
         // Только плеер, без сессий: слева обложка, справа «эквалайзер».
         if presenter.mediaActive, presenter.summaryChips.isEmpty {
             let width: CGFloat = 42
+            // Меню приложения вплотную к вырезу: обложка уходит направо, «эквалайзер» убирается.
+            if let left = space.left, left < width {
+                return EarLayout(style: .compact, left: [], right: [], leftWidth: 0, rightWidth: min(width, availableRight ?? width), showsMedia: true)
+            }
             return EarLayout(style: .compact, left: [], right: [], leftWidth: width, rightWidth: min(width, availableRight ?? width))
         }
         let font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        return EarLayout.make(chips: presenter.summaryChips, availableRight: availableRight, withMedia: presenter.mediaActive) {
+        return EarLayout.make(chips: presenter.summaryChips, availableLeft: space.left, availableRight: availableRight, withMedia: presenter.mediaActive) {
             ceil(($0 as NSString).size(withAttributes: [.font: font]).width)
         }
     }
 
+    /// Перешли на другой стол или поменялись параметры экрана: ближайшие две секунды замеры места не принимаем.
+    func noteScreenTransition() {
+        spaceFrozenUntil = Date().addingTimeInterval(2)
+        pendingFree = nil
+    }
+
     /// Узнать, сколько места до первого значка справа от выреза. true — место изменилось и остров надо пересобрать.
     /// Значки меняются сами по себе (SwiftBar меняет заголовок, приложения добавляют и убирают значки), поэтому
-    /// пока остров свёрнут, это проверяется раз в пару секунд.
+    /// пока остров свёрнут, это проверяется раз в пару секунд. Чтобы «уши» не дёргались при переходе между столами, новое
+    /// значение принимается только после двух одинаковых замеров подряд и не во время перехода; самый первый замер — сразу.
     @discardableResult
-    func refreshMenuBarSpace(force: Bool = false) -> Bool {
+    func refreshMenuBarSpace(force: Bool = false, immediate: Bool = false) -> Bool {
         guard let geometry else { return false }
         if !force, Date().timeIntervalSince(spaceCheckedAt) < 0.5 { return false }
+        if Date() < spaceFrozenUntil { return false }
         spaceCheckedAt = Date()
-        var sample = MenuBarLayout.freeSpaceRightOfNotch(on: geometry.screen, notchWidth: geometry.notchWidth)
-        // Отладка: подставить свободное место (`--debug-free-right 36`), чтобы проверить виды ушей без значков.
-        if let i = CommandLine.arguments.firstIndex(of: "--debug-free-right"), i + 1 < CommandLine.arguments.count,
-           let value = Double(CommandLine.arguments[i + 1]) { sample = .points(CGFloat(value)) }
-        let free: CGFloat?
-        switch sample {
-        case .unknown: return false           // строка спрятана: остаёмся при последнем известном месте
-        case .unlimited: free = nil
-        case .points(let value): free = value
+        var right = MenuBarLayout.freeSpaceRightOfNotch(on: geometry.screen, notchWidth: geometry.notchWidth)
+        var left = MenuBarLayout.freeSpaceLeftOfNotch(on: geometry.screen, notchWidth: geometry.notchWidth)
+        // Отладка: подставить свободное место (`--debug-free-right 36`, `--debug-free-left 0`), чтобы проверить виды ушей.
+        if let value = Self.debugValue("--debug-free-right") { right = .points(value) }
+        if let value = Self.debugValue("--debug-free-left") { left = .points(value) }
+        // Значков справа не видно — строка меню спрятана (полноэкранное окно): меню слева тоже не видны, хотя «Универсальный
+        // доступ» и сообщает их места. Остаёмся при последнем известном месте с обеих сторон.
+        if case .unknown = right { return false }
+        // Меню слева не разглядеть (нет «Универсального доступа») — левая сторона остаётся при последнем известном месте.
+        func value(_ sample: MenuBarLayout.FreeSpace, _ last: CGFloat?) -> CGFloat? {
+            switch sample {
+            case .unknown: return last
+            case .unlimited: return nil
+            case .points(let v): return v
+            }
         }
-        let changed: Bool
-        switch (free, availableRight) {
-        case (nil, nil): changed = false
-        case let (a?, b?): changed = abs(a - b) >= 2
-        default: changed = true
+        let free = Space(left: value(left, space.left), right: value(right, space.right))
+        if free.same(as: space) {
+            pendingFree = nil
+            hasMeasuredSpace = true
+            return false
         }
-        if changed { availableRight = free; recomputeLayout() }
-        return changed
+        if hasMeasuredSpace, !immediate {
+            if let pending = pendingFree, pending.value.same(as: free) { pendingFree = (free, pending.seen + 1) } else { pendingFree = (free, 1) }
+            guard (pendingFree?.seen ?? 0) >= 2 else { return false }
+        }
+        hasMeasuredSpace = true
+        pendingFree = nil
+        space = free
+        recomputeLayout()
+        return true
+    }
+
+    private static func debugValue(_ flag: String) -> CGFloat? {
+        guard let i = CommandLine.arguments.firstIndex(of: flag), i + 1 < CommandLine.arguments.count,
+              let value = Double(CommandLine.arguments[i + 1]) else { return nil }
+        return CGFloat(value)
     }
 
     /// Сдвиг центра окна от середины экрана: свёрнутый остров может быть несимметричным (справа места мало).
@@ -281,16 +348,29 @@ final class IslandViewModel: ObservableObject {
         case .list:
             let rows = CGFloat(presenter.sessions.count)
             let player = presenter.mediaActive ? PlayerView.height : 0
-            return CGSize(width: Self.listWidth, height: notchH + 10 + player + rows * 54 + 40)
+            let pinned = pinnedRowCount > 0 ? PinnedRowView.height : 0
+            return CGSize(width: Self.listWidth, height: notchH + 10 + player + pinned + rows * 54 + 44)
         case .card:
             guard let card = presenter.currentCard else { return .zero }
-            // Оценка числа строк с переносами: ~46 символов моноширинного шрифта в строке карточки.
+            let m = CardMetrics.self
+            let label = label(for: card.session)
+            let hasContext = !label.context.isEmpty || card.session.hostApp != nil
+            let header = m.titleLine + (hasContext ? m.contextLine : 0)
+            if let questions = card.request.questions {
+                let index = min(ask.index, questions.count - 1)
+                let body = QuestionMetrics.bodyHeight(questions[index], index: index, count: questions.count)
+                return CGSize(width: m.width, height: ceil(notchH + m.top + header + m.afterHeader + body + m.beforeActions + m.actions + m.bottom))
+            }
+            let question = CGFloat(m.lines(card.request.question, font: m.questionFont, limit: 2)) * m.questionLine
+            let purpose = card.request.purpose.map { m.purposeGap + CGFloat(m.lines($0, font: m.purposeFont, limit: 2)) * m.purposeLine } ?? 0
+            // Строки команды с переносами: сколько знаков моноширинного шрифта входит в ящик.
+            let perLine = max(20, Int((m.inner - 2 * m.codePad) / ceil(("x" as NSString).size(withAttributes: [.font: m.codeFont]).width)))
             let estimated = card.request.detail.split(separator: "\n", omittingEmptySubsequences: false)
-                .reduce(0) { $0 + max(1, Int(ceil(Double($1.count) / 46.0))) }
-            let lines = CGFloat(min(max(estimated, 1), 9))
-            let detail = min(max(lines * 16 + 24, 44), 190)
-            // Шапка с проектом, ящик с командой (detail), кнопки, ссылки и подпись.
-            return CGSize(width: Self.listWidth, height: notchH + 10 + 28 + detail + 100 + 24)
+                .reduce(0) { $0 + max(1, Int(ceil(Double($1.count) / Double(perLine)))) }
+            let lines = CGFloat(min(max(estimated, 1), 10))
+            let code = lines * m.codeLine + 2 * m.codePad + 2
+            let height = notchH + m.top + header + m.afterHeader + question + purpose + m.beforeCode + code + m.beforeActions + m.actions + m.bottom
+            return CGSize(width: m.width, height: ceil(height))
         }
     }
 
@@ -348,6 +428,91 @@ final class IslandViewModel: ObservableObject {
 
     func dismissCard() { apply { $0.dismissCard() } }
 
+    // MARK: ряд закреплённых значков
+
+    var pinnedRowCount: Int { icons?.pinnedRow.count ?? 0 }
+
+    /// Значки или закреплённое поменялись. Содержимое ряда и подпись внизу обновляют сами (они следят за значками); остров
+    /// пересобирается, только если ряд появился, исчез или сменил высоту.
+    private func iconsChanged() {
+        let count = pinnedRowCount
+        defer { lastPinnedRowCount = count }
+        guard presenter.mode == .list, (count > 0) != (lastPinnedRowCount > 0) else { return }
+        recomputeLayout()
+        withAnimation(Look.reduceMotion ? nil : .easeOut(duration: 0.15)) { objectWillChange.send() }
+        onLayoutChange?()
+    }
+
+    /// Нажать закреплённый значок (спрятанный сворачиванием — после возврата значков).
+    func pressPinned(_ entry: MenuBarEntry) { icons?.press(entry) { [weak self] in self?.collapse() } }
+
+    // MARK: ответ на вопрос Claude
+
+    private var currentQuestions: [AskQuestion]? { presenter.currentCard?.request.questions }
+
+    /// Нажат вариант. Вопрос с одним ответом: ответ принят, дальше следующий вопрос или отправка. С несколькими: отметка.
+    func askPick(_ label: String) {
+        guard !ask.sending, let questions = currentQuestions, ask.index < questions.count else { return }
+        let question = questions[ask.index]
+        guard question.options.contains(where: { $0.label == label }) else { return }
+        if question.multiSelect {
+            var chosen = ask.picks[question.question] ?? []
+            if let i = chosen.firstIndex(of: label) { chosen.remove(at: i) } else { chosen.append(label) }
+            ask.picks[question.question] = chosen
+            askChanged(resize: false)
+        } else {
+            ask.picks[question.question] = [label]
+            askAdvance()
+        }
+    }
+
+    /// «Далее» / «Готово» у вопроса с несколькими ответами.
+    func askNext() {
+        guard !ask.sending, let questions = currentQuestions, ask.index < questions.count,
+              !(ask.picks[questions[ask.index].question] ?? []).isEmpty else { return }
+        askAdvance()
+    }
+
+    func askBack() {
+        guard !ask.sending, ask.index > 0 else { return }
+        ask.index -= 1
+        askChanged(resize: true)
+    }
+
+    private func askAdvance() {
+        guard let questions = currentQuestions else { return }
+        if ask.index + 1 < questions.count {
+            ask.index += 1
+            askChanged(resize: true)
+        } else {
+            submitAsk()
+        }
+    }
+
+    private func submitAsk() {
+        guard let card = presenter.currentCard else { return }
+        let id = card.request.requestId
+        ask.sending = true
+        hub.answer(requestId: id, picks: ask.picks) { [weak self] delivered in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if delivered {
+                    self.apply { $0.requestClosed(id) }
+                } else {
+                    // Не доставлено: запрос уже закрыт (карточку снимет само закрытие) или выбор не подошёл — начинаем вопросы заново.
+                    self.ask = AskDraft(requestId: self.ask.requestId)
+                    self.askChanged(resize: true)
+                }
+            }
+        }
+    }
+
+    private func askChanged(resize: Bool) {
+        if resize { recomputeLayout() }
+        withAnimation(Look.reduceMotion ? nil : .easeOut(duration: 0.15)) { objectWillChange.send() }
+        if resize { onLayoutChange?() }
+    }
+
     /// Закрыть все карточки (сон, пропал экран с вырезом): диалоги остаются в терминалах.
     func releaseCards() {
         hub.releaseAllCards()
@@ -358,14 +523,22 @@ final class IslandViewModel: ObservableObject {
     private func apply(_ change: (inout IslandPresenter) -> Void) {
         var next = presenter
         change(&next)
-        let before = visibleKey(presenter, titles: titles)
+        let before = visibleKey(presenter, labels: labels)
+        let opensList = presenter.mode != .list && next.mode == .list
         presenter = next
+        if opensList, let icons {
+            icons.message = nil
+            icons.refreshIfStale()
+        }
+        if ask.requestId != next.currentCardId {
+            ask = AskDraft(requestId: next.currentCardId)
+        }
         recomputeLayout()
         if CommandLine.arguments.contains("--debug") {
             FileHandle.standardError.write(Data("[island] mode=\(next.mode) summary=\"\(next.summaryText)\" sessions=\(next.sessions.map { "\($0.project):\($0.status):\($0.hostApp ?? "-")" })\n".utf8))
         }
         // Вид перерисовываем, только если изменилось то, что на нём видно в текущем режиме.
-        if visibleKey(next, titles: titles) != before {
+        if visibleKey(next, labels: labels) != before {
             // Смена содержимого (свёрнуто → список → карточка) плавно растворяется; фигуру двигает панель.
             withAnimation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .easeOut(duration: 0.18)) {
                 objectWillChange.send()
@@ -375,7 +548,7 @@ final class IslandViewModel: ObservableObject {
     }
 
     /// Всё, что видно на экране в текущем режиме (в свёрнутом виде это только сводка, в списке — строки, на карточке — запрос).
-    private func visibleKey(_ p: IslandPresenter, titles: [String: String]) -> [String] {
+    private func visibleKey(_ p: IslandPresenter, labels: [String: SessionLabel]) -> [String] {
         switch p.mode {
         case .hidden:
             return ["hidden"]
@@ -384,11 +557,11 @@ final class IslandViewModel: ObservableObject {
                 + p.summaryParts.map { "\($0.status.rawValue):\($0.text)" }
         case .list:
             return ["list", "\(p.mediaActive)"] + p.sessions.map {
-                "\($0.sessionId)|\(titles[$0.sessionId] ?? $0.project)|\($0.status.rawValue)|\($0.currentAction)|\($0.hostApp ?? "")|\($0.queue.count)"
+                "\($0.sessionId)|\(String(describing: labels[$0.sessionId]))|\($0.status.rawValue)|\($0.currentAction)|\($0.hostApp ?? "")|\($0.queue.count)"
             }
         case .card(let id):
             let session = p.currentCard?.session
-            return ["card", id, session?.sessionId ?? "", titles[session?.sessionId ?? ""] ?? "", "\(p.queuedBehindCurrent)", session?.permissionMode ?? ""]
+            return ["card", id, session?.sessionId ?? "", String(describing: labels[session?.sessionId ?? ""]), "\(p.queuedBehindCurrent)", session?.hostApp ?? ""]
         }
     }
 
@@ -407,9 +580,9 @@ final class IslandViewModel: ObservableObject {
         flushTask = nil
         guard let sessions = pendingSessions else { return }
         pendingSessions = nil
-        let newTitles = SessionStore.displayTitles(sessions)
-        if newTitles != titles {
-            titles = newTitles          // сначала названия, чтобы вид собрался с актуальными подписями
+        let newLabels = SessionStore.displayLabels(sessions)
+        if newLabels != labels {
+            labels = newLabels          // сначала подписи, чтобы вид собрался с актуальными названиями
         }
         apply { $0.update(sessions: sessions) }
         if CommandLine.arguments.contains("--debug-open-list"), !sessions.isEmpty, !pinned { toggleList() }
@@ -418,5 +591,23 @@ final class IslandViewModel: ObservableObject {
     private func sessionDone(_ session: Session) {
         guard Settings.soundEnabled, !isWatching(session) else { return }
         NSSound(named: "Tink")?.play()
+    }
+}
+
+/// Свободное место по сторонам выреза (nil — вдоволь).
+struct Space: Equatable {
+    var left: CGFloat?
+    var right: CGFloat?
+
+    /// Совпадает с точностью до пары пунктов (замеры слегка гуляют).
+    func same(as other: Space) -> Bool {
+        func eq(_ a: CGFloat?, _ b: CGFloat?) -> Bool {
+            switch (a, b) {
+            case (nil, nil): return true
+            case let (x?, y?): return abs(x - y) < 2
+            default: return false
+            }
+        }
+        return eq(left, other.left) && eq(right, other.right)
     }
 }

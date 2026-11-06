@@ -18,6 +18,8 @@ final class MenuController: NSObject, NSMenuDelegate {
     }()
     private let hider = MenuBarHider()
     private let list = MenuBarListController()
+    /// Значки строки меню: их же показывает ряд закреплённых на острове.
+    var iconModel: MenuBarListModel { list.model }
     /// Владелец включил или выключил плеер в меню.
     var onPlayerToggle: ((Bool) -> Void)?
     /// Обновления (nil — не настроены в этой сборке).
@@ -52,6 +54,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         if Settings.hidesMenuBarIcons { hider.enable(control: statusItem); list.model.hider = hider }
         updateIcon()
         if CommandLine.arguments.contains("--debug-hider-selftest") { hider.selfTest() }
+        if CommandLine.arguments.contains("--debug-hider-misalign-selftest") { hider.selfTestMisaligned() }
         if CommandLine.arguments.contains("--debug-open-setup") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.showSetupGuide() }
         }

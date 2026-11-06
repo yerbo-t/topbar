@@ -13,17 +13,13 @@ enum Look {
     static let code = Color(red: 0.863, green: 0.867, blue: 0.886)           // #dcdde2
     static let tool = Color(red: 0.478, green: 0.635, blue: 1.0)             // #7aa2ff
     static let muted = Color(red: 0.663, green: 0.671, blue: 0.710)          // #a9abb5
+    /// Строки правки файла: что уходит и что приходит (светлые, чтобы читались на тёмном ящике).
+    static let removed = Color(red: 1.0, green: 0.553, blue: 0.533)          // #ff8d88
+    static let added = Color(red: 0.494, green: 0.871, blue: 0.616)          // #7ede9d
     /// Подсветка строки, которой нужно внимание.
     static let hot = Color.white.opacity(0.08)
 
     static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
-}
-
-/// Подпись сессии «проект · ветка»: проект крупно, ветка рядом спокойным цветом (как в демо на сайте).
-func sessionTitle(_ title: String, size: CGFloat) -> Text {
-    guard let range = title.range(of: " · ") else { return Text(title).font(.system(size: size, weight: .semibold)) }
-    return Text(title[..<range.lowerBound]).font(.system(size: size, weight: .semibold))
-        + Text(" · " + String(title[range.upperBound...])).font(.system(size: size - 2)).foregroundColor(Look.muted)
 }
 
 /// Кнопка-таблетка: зелёная «Разрешить», тёмная с тонкой рамкой «Отклонить», светлая для крупных действий. При нажатии
@@ -31,6 +27,8 @@ func sessionTitle(_ title: String, size: CGFloat) -> Text {
 struct PillButtonStyle: ButtonStyle {
     enum Kind { case allow, neutral, light }
     let kind: Kind
+    /// Маленькая кнопка для подвалов и строк (меньше шрифт и отступы).
+    var compact = false
 
     func makeBody(configuration: Configuration) -> some View {
         let pressed = configuration.isPressed
@@ -46,11 +44,11 @@ struct PillButtonStyle: ButtonStyle {
         }
         let line: Color = kind == .neutral ? Look.neutralLine : .clear
         configuration.label
-            .font(.system(size: 13.5, weight: .semibold))
-            .padding(.horizontal, 18).padding(.vertical, 9)
+            .font(.system(size: compact ? 12.5 : 13.5, weight: .semibold))
+            .padding(.horizontal, compact ? 12 : 18).padding(.vertical, compact ? 6 : 9)
             .foregroundStyle(ink)
-            .background(RoundedRectangle(cornerRadius: 12).fill(fill))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(line, lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: compact ? 10 : 12).fill(fill))
+            .overlay(RoundedRectangle(cornerRadius: compact ? 10 : 12).strokeBorder(line, lineWidth: 1))
             .scaleEffect(pressed && !Look.reduceMotion ? 0.93 : 1)
             .animation(.easeOut(duration: 0.18), value: pressed)
     }
