@@ -64,9 +64,22 @@ public enum BridgeRunner {
 
         var decision: [String: Any] = ["behavior": behavior]
         if behavior == "deny", let text = reply.message { decision["message"] = text }
+        if let answers = reply.answers {
+            // Ответ на вопрос Claude: исходный ввод вызова плюс `answers`; без ввода ответ не собрать — тогда «без решения».
+            guard behavior == "allow", let updated = updatedInput(stdin: stdin, answers: answers) else { return nil }
+            decision["updatedInput"] = updated
+        }
         let output: [String: Any] = [
             "hookSpecificOutput": ["hookEventName": "PermissionRequest", "decision": decision]
         ]
         return try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys])
+    }
+
+    /// Ввод вызова `AskUserQuestion` из события хука (как пришёл, без пересборки) с добавленным полем `answers`.
+    static func updatedInput(stdin: Data, answers: [String: String]) -> [String: Any]? {
+        guard let object = (try? JSONSerialization.jsonObject(with: stdin)) as? [String: Any],
+              var input = object["tool_input"] as? [String: Any] else { return nil }
+        input["answers"] = answers
+        return input
     }
 }

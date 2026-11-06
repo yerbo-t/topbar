@@ -266,6 +266,25 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertFalse(store.sessions["s1"]!.queue[0].cardable)
     }
 
+    func testQuestionWithOptionsGetsACardAndParsedQuestions() {
+        let input = AskQuestionTests.input([AskQuestionTests.question()])
+        store.apply(Fx.msg("PermissionRequest", req: "r1", tool: "AskUserQuestion", input: input), now: now)
+        let request = store.sessions["s1"]!.queue[0]
+        XCTAssertTrue(request.cardable)
+        XCTAssertEqual(request.questions?.first?.question, "Какой цвет?")
+        XCTAssertEqual(status(), .waitingPermission)
+    }
+
+    func testQuestionWithPreviewOrPlanApprovalStaysInTheTerminal() {
+        let withPreview = AskQuestionTests.input([AskQuestionTests.question(
+            options: [AskQuestionTests.option("А", preview: "x"), AskQuestionTests.option("Б")])])
+        store.apply(Fx.msg("PermissionRequest", req: "r1", tool: "AskUserQuestion", input: withPreview), now: now)
+        store.apply(Fx.msg("PermissionRequest", req: "r2", tool: "ExitPlanMode"), now: now)
+        let queue = store.sessions["s1"]!.queue
+        XCTAssertEqual(queue.map(\.cardable), [false, false])
+        XCTAssertEqual(queue.map { $0.questions == nil }, [true, true])
+    }
+
     // MARK: хост сессии
 
     func testHostComesFromBundleIdWhenThereIsNoTermProgram() {

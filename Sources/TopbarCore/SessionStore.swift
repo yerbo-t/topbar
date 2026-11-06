@@ -119,6 +119,7 @@ public struct SessionStore {
             let match = s.running.last {
                 $0.toolName == name && $0.fingerprint == fingerprint && !($0.toolUseId.map(linked.contains) ?? false)
             }
+            let questions = name == "AskUserQuestion" ? AskQuestions.parse(ev.toolInput) : nil
             let request = PermissionRequest(
                 requestId: msg.requestId,
                 sessionId: ev.sessionId,
@@ -129,9 +130,10 @@ public struct SessionStore {
                 agentType: ev.agentType,
                 toolUseId: match?.toolUseId,
                 receivedAt: now,
-                cardable: PermissionPolicy.intercepts(toolName: ev.toolName),
+                cardable: PermissionPolicy.intercepts(toolName: ev.toolName) || questions != nil,
                 question: ActionDescriber.question(toolName: ev.toolName, input: ev.toolInput),
-                purpose: ActionDescriber.purpose(toolName: ev.toolName, input: ev.toolInput)
+                purpose: ActionDescriber.purpose(toolName: ev.toolName, input: ev.toolInput),
+                questions: questions
             )
             if !isNew { refreshLabels(&s) }   // карточке — свежее имя (владелец мог переименовать сессию)
             s.queue.append(request)

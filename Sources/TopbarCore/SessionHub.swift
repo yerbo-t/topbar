@@ -87,6 +87,29 @@ public final class SessionHub {
         }
     }
 
+    /// Ответ владельца на вопрос Claude с карточки (вопрос → выбранные подписи вариантов). Выбор проверяется по самим вопросам
+    /// запроса; не подошёл — `completion(false)`, карточка остаётся. Остальное — как у `decide`.
+    public func answer(requestId: String, picks: [String: [String]], completion: ((Bool) -> Void)? = nil) {
+        queue.async { [self] in
+            guard channels[requestId] != nil,
+                  let request = store.sessions.values.lazy.compactMap({ $0.queue.first { $0.requestId == requestId } }).first,
+                  let questions = request.questions,
+                  let answers = AskQuestions.answers(from: picks, for: questions),
+                  let channel = channels.removeValue(forKey: requestId) else {
+                emit { completion?(false) }
+                return
+            }
+            let delivered = channel.send(.answered(answers))
+            if delivered {
+                store.resolve(requestId: requestId)
+                notifyChange()
+            } else {
+                emit { self.onRequestClosed?(requestId) }
+            }
+            emit { completion?(delivered) }
+        }
+    }
+
     /// Закрыть все карточки без решения (сон, закрытая крышка, пропал экран с вырезом):
     /// диалоги остаются в терминалах, статусы сессий не меняются.
     public func releaseAllCards() {

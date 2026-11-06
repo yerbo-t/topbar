@@ -37,12 +37,15 @@ public struct PermissionRequest: Equatable, Sendable {
     /// `tool_use_id` вызова, если удалось привязать запрос к `PreToolUse`.
     public let toolUseId: String?
     public let receivedAt: Date
-    /// false — вопросы вроде `AskUserQuestion`: сессия «ждёт», но кнопок «разрешить/отклонить» нет.
+    /// false — вопросы и планы (`ExitPlanMode`, а также `AskUserQuestion`, которого остров не умеет показать): сессия «ждёт»,
+    /// но карточки нет, ответ — в терминале.
     public let cardable: Bool
     /// Вопрос карточки целиком: «Разрешить выполнить команду?».
     public var question: String = ""
     /// Пояснение к запросу: что Claude написал о команде (`description` у Bash), путь файла, запрос поиска.
     public var purpose: String? = nil
+    /// Вопросы Claude с вариантами (`AskUserQuestion`), если остров их умеет показать: на них отвечают кнопками на карточке.
+    public var questions: [AskQuestion]? = nil
 }
 
 public struct Session: Equatable, Sendable {
@@ -95,7 +98,8 @@ public struct Summary: Equatable, Sendable {
     public var top: SessionStatus?
 }
 
-/// Какие инструменты остров не превращает в карточку: кнопки «разрешить/отклонить» для них бессмысленны.
+/// Какие инструменты остров не превращает в карточку «разрешить/отклонить»: для них эти кнопки бессмысленны.
+/// У `AskUserQuestion` своя карточка с вариантами ответа (когда вопрос остров умеет показать, см. `AskQuestions`).
 public enum PermissionPolicy {
     public static let passthroughTools: Set<String> = ["AskUserQuestion", "ExitPlanMode"]
 

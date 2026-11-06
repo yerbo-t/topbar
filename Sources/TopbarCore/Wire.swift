@@ -50,16 +50,23 @@ public struct CoreReply: Codable, Equatable, Sendable {
     public var kind: Kind
     public var behavior: String?
     public var message: String?
+    /// Ответы владельца на вопросы Claude (текст вопроса → выбранные подписи): мост кладёт их в `updatedInput`.
+    public var answers: [String: String]?
 
-    public init(kind: Kind, behavior: String? = nil, message: String? = nil) {
+    public init(kind: Kind, behavior: String? = nil, message: String? = nil, answers: [String: String]? = nil) {
         self.kind = kind
         self.behavior = behavior
         self.message = message
+        self.answers = answers
     }
 
     public static let ack = CoreReply(kind: .ack)
     public static let none = CoreReply(kind: .none)
     public static func allow() -> CoreReply { CoreReply(kind: .decision, behavior: "allow") }
+    /// Разрешить вызов `AskUserQuestion` сразу с ответами: диалог в терминале не открывается.
+    public static func answered(_ answers: [String: String]) -> CoreReply {
+        CoreReply(kind: .decision, behavior: "allow", answers: answers)
+    }
     public static func deny(_ message: String = "Отклонено в topbar") -> CoreReply {
         CoreReply(kind: .decision, behavior: "deny", message: message)
     }
