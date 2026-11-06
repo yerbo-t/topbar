@@ -222,4 +222,36 @@ final class IslandPresenterTests: XCTestCase {
         XCTAssertTrue(WatchPolicy.isWatching(s, frontmostBundleId: "com.example.NewTerminal"))
         XCTAssertFalse(WatchPolicy.isWatching(s, frontmostBundleId: "com.apple.Terminal"))
     }
+
+    // MARK: обложка музыки в правом ухе
+
+    func testMusicThumbGoesToTheRightEarWhenLeftHasWords() {
+        let one = EarLayout.make(chips: [chip(.working, 2, "работает")], availableRight: nil, withMedia: true, measure: fixedMeasure)
+        XCTAssertTrue(one.showsMedia, "слева слово, значит обложка справа")
+        XCTAssertGreaterThanOrEqual(one.rightWidth, EarLayout.minThumbEar)
+        XCTAssertEqual(one.style, .full, "слова слева остаются полными")
+    }
+
+    func testMusicThumbIsSkippedWhenThereIsNoRoomRight() {
+        let tight = EarLayout.make(chips: [chip(.working, 2, "работает")], availableRight: 30, withMedia: true, measure: fixedMeasure)
+        XCTAssertFalse(tight.showsMedia)
+        XCTAssertLessThanOrEqual(tight.rightWidth, 30)
+    }
+
+    func testMusicThumbWidensTheRightEarWhenBothEarsHaveChips() {
+        let chips = [chip(.working, 1, "работает"), chip(.waitingPermission, 1, "ждёт")]
+        let without = EarLayout.make(chips: chips, availableRight: nil, measure: fixedMeasure)
+        let with = EarLayout.make(chips: chips, availableRight: nil, withMedia: true, measure: fixedMeasure)
+        XCTAssertTrue(with.showsMedia)
+        XCTAssertEqual(with.rightWidth, without.rightWidth + EarLayout.mediaSlot)
+        XCTAssertEqual(with.leftWidth, without.leftWidth)
+        let room = without.rightWidth + EarLayout.mediaSlot - 1
+        XCTAssertFalse(EarLayout.make(chips: chips, availableRight: room, withMedia: true, measure: fixedMeasure).showsMedia,
+                       "не хватает места под обложку — слова важнее")
+    }
+
+    func testNoMusicThumbWithoutMediaOrWithoutChips() {
+        XCTAssertFalse(EarLayout.make(chips: [chip(.working, 1, "работает")], availableRight: nil, measure: fixedMeasure).showsMedia)
+        XCTAssertFalse(EarLayout.make(chips: [], availableRight: nil, withMedia: true, measure: fixedMeasure).showsMedia)
+    }
 }

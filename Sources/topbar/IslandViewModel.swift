@@ -229,7 +229,7 @@ final class IslandViewModel: ObservableObject {
             return EarLayout(style: .compact, left: [], right: [], leftWidth: width, rightWidth: min(width, availableRight ?? width))
         }
         let font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        return EarLayout.make(chips: presenter.summaryChips, availableRight: availableRight) {
+        return EarLayout.make(chips: presenter.summaryChips, availableRight: availableRight, withMedia: presenter.mediaActive) {
             ceil(($0 as NSString).size(withAttributes: [.font: font]).width)
         }
     }

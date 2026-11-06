@@ -114,7 +114,7 @@ struct CollapsedView: View {
             } else {
                 ear(ears.left, style: ears.style, alignment: .trailing, width: ears.leftWidth)
                 Spacer().frame(width: notchW)
-                ear(ears.right, style: ears.style, alignment: .leading, width: ears.rightWidth)
+                rightEar(ears)
             }
         }
         .frame(height: model.geometry?.notchHeight ?? 32)
@@ -123,6 +123,24 @@ struct CollapsedView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(model.presenter.summaryText.isEmpty ? (model.nowPlaying?.title ?? "Сессии Claude Code") : model.presenter.summaryText)
         .accessibilityAddTraits(.isButton)
+    }
+
+    /// Правое ухо: пункты сводки и, если играет музыка, а слева уже слова, обложка трека (на паузе приглушена).
+    @ViewBuilder private func rightEar(_ ears: EarLayout) -> some View {
+        let playing = model.nowPlaying?.playing ?? false
+        if !ears.showsMedia {
+            ear(ears.right, style: ears.style, alignment: .leading, width: ears.rightWidth)
+        } else if ears.right.isEmpty {
+            ArtworkView(image: model.artwork, size: 18, radius: 5).opacity(playing ? 1 : 0.55)
+                .frame(width: ears.rightWidth)
+        } else {
+            HStack(spacing: 0) {
+                ear(ears.right, style: ears.style, alignment: .leading, width: ears.rightWidth - EarLayout.mediaSlot)
+                ArtworkView(image: model.artwork, size: 18, radius: 5).opacity(playing ? 1 : 0.55)
+                    .frame(width: EarLayout.mediaSlot, alignment: .leading)
+            }
+            .frame(width: ears.rightWidth)
+        }
     }
 
     private func ear(_ chips: [SummaryChip], style: EarStyle, alignment: Alignment, width: CGFloat) -> some View {
