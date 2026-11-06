@@ -40,6 +40,10 @@ final class MenuBarHider {
     private var syncedControlPosition: Double?
     private var watchdog: Timer?
     private var misalignedChecks = 0
+    private var settleToken = 0
+    /// Сколько значков между выталкивателем и знаком сторож уже пытался убрать пересозданием (дальше принимает как есть).
+    private var repairedStrayCount = 0
+    private var settleAttempts = 0
     private var rebuildTimes: [Date] = []
     private var moveObserver: NSObjectProtocol?
     private(set) var isEnabled = false
@@ -97,33 +101,23 @@ final class MenuBarHider {
         return .changed
     }
 
-    /// Свернуть, предварительно убедившись, что выталкиватель стоит впритык к знаку (иначе спрячется только часть значков):
-    /// если нет — пересоздать его и свернуть, когда он встанет на место.
+    /// Свернуть, предварительно поставив выталкиватель впритык к знаку: иначе спрячется только часть значков или ни одного.
+    /// В развёрнутом виде выталкивателя в строке нет, поэтому на время проверки он показывается узким.
     private func collapseAligned() {
-        // Выталкиватель в развёрнутом виде убран из строки: на миг показываем его узким, ждём раскладку и проверяем место.
-        pusher?.isVisible = true
-        pusher?.length = 1
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        // Новый значок система ставит на сохранённое место надёжнее, чем сдвигает старый, поэтому выталкиватель создаётся заново.
+        recreatePusher()
+        settlePusher(allowRebuild: true) { [weak self] ok in
             guard let self, self.isEnabled, !self.isCollapsed else { return }
-            if self.misalignedByGap() {
-                self.rebuildPusher()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in self?.setCollapsed(true) }
-            } else {
-                self.setCollapsed(true)
-            }
+            if !ok { Self.trace("выталкиватель не встал впритык к знаку за 3 с, сворачиваю как есть (сторож поправит)") }
+            self.setCollapsed(true)
         }
-    }
-
-    /// Пока выталкиватель узкий (проверка перед сворачиванием), его положение точное: зазор до знака должен быть почти нулевым.
-    /// В свёрнутом окно огромное и обрезается системой, там зазору верить нельзя.
-    private func misalignedByGap() -> Bool {
-        guard isEnabled, !isCollapsed, let gap = gapBetweenPusherAndControl() else { return false }
-        return abs(gap) > 4
     }
 
     func setCollapsed(_ collapsed: Bool) {
         guard isEnabled, collapsed != isCollapsed else { return }
         isCollapsed = collapsed
+        repairedStrayCount = 0
+        Self.trace(collapsed ? "значки свёрнуты" : "значки показаны")
         UserDefaults.standard.set(collapsed, forKey: Self.collapsedKey)
         applyLength()
         if collapsed {
@@ -143,20 +137,59 @@ final class MenuBarHider {
         UserDefaults.standard.object(forKey: Self.positionKey(Self.controlName)) as? Double
     }
 
-    /// (Пере)создать выталкиватель сразу левее знака: положение значка система берёт из настроек при создании.
+    /// Пересоздать выталкиватель сразу левее знака. Свёрнуто — дождаться, пока он встанет впритык (спрятанные значки на это
+    /// время на долю секунды показываются), и вернуть длинным; развёрнуто — просто убрать из строки: место ему нужно только при сворачивании,
+    /// и `collapseAligned` создаёт его заново.
     private func rebuildPusher() {
+        recreatePusher()
+        guard isCollapsed else { applyLength(); return }
+        settlePusher(allowRebuild: true) { [weak self] ok in
+            if !ok { Self.trace("пересозданный выталкиватель не встал впритык к знаку за 3 с") }
+            self?.applyLength()
+        }
+    }
+
+    /// Новый выталкиватель сразу левее знака: положение значка система берёт из настроек при создании.
+    private func recreatePusher() {
         if let old = pusher { NSStatusBar.system.removeStatusItem(old) }
         let position = (controlPosition ?? Self.seedControl) + 1
         UserDefaults.standard.set(position, forKey: Self.positionKey(Self.pusherName))
-        let item = NSStatusBar.system.statusItem(withLength: 0)
+        let item = NSStatusBar.system.statusItem(withLength: 1)
         item.autosaveName = Self.pusherName
+        item.isVisible = true
         pusher = item
         syncedControlPosition = controlPosition
-        // Новый значок система первое время держит у левого края и ставит на сохранённое место только при следующей раскладке.
-        // Подталкиваем: короткая ненулевая длина запускает раскладку, и выталкиватель встаёт впритык к знаку.
-        item.isVisible = true
-        item.length = 1
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in self?.applyLength() }
+    }
+
+    /// Новый значок система ставит на сохранённое место через долю секунды (видно, как он «доезжает»), иногда не сразу. Ждём, пока зазор
+    /// между выталкивателем и знаком не станет нулевым; пока ждём, подталкиваем длиной (1 ↔ 2), а если за ~0,9 с не встал — создаём
+    /// заново (до двух раз). Всего до ~2,7 с; `done(false)` — так и не встал.
+    private func settlePusher(allowRebuild: Bool, done: @escaping (Bool) -> Void) {
+        settleToken += 1
+        settleAttempts = 0
+        settleStep(settleToken, allowRebuild: allowRebuild, done: done)
+    }
+
+    private func settleStep(_ token: Int, allowRebuild: Bool, done: @escaping (Bool) -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self, token == self.settleToken, self.isEnabled else { return }
+            self.settleAttempts += 1
+            let gap = self.gapBetweenPusherAndControl()
+            Self.trace("выталкиватель: попытка \(self.settleAttempts), зазор до знака \(gap.map(String.init) ?? "?")")
+            if let gap, abs(gap) <= 4 { done(true); return }
+            if self.settleAttempts >= 18 { done(false); return }
+            if allowRebuild, self.settleAttempts % 6 == 0 {
+                self.recreatePusher()
+            } else {
+                self.pusher?.length = self.settleAttempts % 2 == 0 ? 1 : 2
+            }
+            self.settleStep(token, allowRebuild: allowRebuild, done: done)
+        }
+    }
+
+    private static func trace(_ text: String) {
+        guard CommandLine.arguments.contains("--debug") else { return }
+        FileHandle.standardError.write(Data("[hider] \(text)\n".utf8))
     }
 
     /// Знак сдвинули (владелец перетащил или система переложила значки): когда он остановится, подвинуть выталкиватель.
@@ -210,7 +243,10 @@ final class MenuBarHider {
         // В развёрнутом виде выталкивателя в строке нет, и его место проверяется перед сворачиванием; сторож нужен свёрнутому.
         guard isCollapsed else { misalignedChecks = 0; return }
         let strayIcons = iconsBetweenPusherAndControl()?.count ?? 0
-        guard strayIcons > 0 else { misalignedChecks = 0; return }
+        // Системные значки (индикатор микрофона и т. п.) система ставит между выталкивателем и знаком сама, и спрятать их нельзя:
+        // после одного пересоздания, которое их не убрало, они принимаются как есть, иначе спрятанные значки мигали бы каждые 3 с.
+        if strayIcons == 0 { repairedStrayCount = 0 }
+        guard strayIcons > repairedStrayCount else { misalignedChecks = 0; return }
         // Два раза подряд (≈3 с): это не мимолётный сдвиг при перестановке.
         misalignedChecks += 1
         guard misalignedChecks >= 2 else { return }
@@ -219,6 +255,7 @@ final class MenuBarHider {
         rebuildTimes.removeAll { Date().timeIntervalSince($0) > 60 }
         guard rebuildTimes.count < 3 else { return }
         rebuildTimes.append(Date())
+        repairedStrayCount = strayIcons
         FileHandle.standardError.write(Data("[hider] выталкиватель стоял не у знака (между ними значков: \(strayIcons)), переставляю\n".utf8))
         rebuildPusher()
     }
@@ -236,12 +273,12 @@ final class MenuBarHider {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [self] in
             frames("старт")
-            setCollapsed(true)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [self] in
-                frames("после сворачивания (знак должен остаться на экране, значков в строке меньше)")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { [self] in
+            _ = toggle()      // тот же путь, что у клика по знаку: проверка места выталкивателя, потом сворачивание
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.8) { [self] in
+                frames("после сворачивания (знак должен остаться на экране, значков в строке меньше, левее знака 0)")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [self] in
                     setCollapsed(false)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [self] in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [self] in
                         frames("после разворачивания")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [self] in
                             frames("через 12 с (само не сворачивается: должно остаться развёрнутым)")
@@ -307,7 +344,8 @@ final class MenuBarHider {
     /// Сколько значков лежит левее выталкивателя в видимой части строки; nil — строка меню не видна (полноэкранное окно).
     /// Считается только в развёрнутом виде.
     private func itemsToHide() -> Int? {
-        guard let window = pusher?.button?.window, let screen = window.screen ?? NSScreen.main else { return nil }
+        // Считаем от знака: выталкиватель в развёрнутом виде убран из строки, его окно стоит за краем экрана.
+        guard let window = control?.button?.window, let screen = window.screen ?? NSScreen.main else { return nil }
         let frames = MenuBarLayout.statusItemFrames(on: screen)
         guard !frames.isEmpty else { return nil }
         let notchRight = screen.auxiliaryTopRightArea?.minX ?? screen.frame.minX   // правый край выреза
