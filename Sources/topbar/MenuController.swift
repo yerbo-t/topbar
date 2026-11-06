@@ -2,8 +2,8 @@ import AppKit
 import ServiceManagement
 import TopbarCore
 
-/// Иконка в строке меню: вход в управление приложением. Пока включено сворачивание значков, левый клик по ней прячет и
-/// показывает значки других приложений, а меню открывается правым кликом (или клик с Control).
+/// Значок приложения в строке меню: вход в управление. Левый клик открывает список значков с кнопкой «Спрятать значки»
+/// (прячется всё левее значка topbar), меню приложения открывается правым кликом (или клик с Control).
 @MainActor
 final class MenuController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
@@ -19,7 +19,7 @@ final class MenuController: NSObject, NSMenuDelegate {
             list.model.onUpdate = { [weak self] in self?.updater?.checkForUpdates() }
             updater?.onAvailabilityChange = { [weak self] version in
                 self?.list.model.updateVersion = version
-                self?.statusItem.button?.toolTip = version.map { "Доступна версия \($0) (откройте список значков)" }
+                self?.updateIcon()
             }
         }
     }
@@ -28,7 +28,7 @@ final class MenuController: NSObject, NSMenuDelegate {
 
     override init() {
         if Settings.hidesMenuBarIcons { MenuBarHider.seedPositions() }
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: MenuBarLayout.controlIconLength)
         statusItem.autosaveName = MenuBarHider.controlName
         super.init()
         menu.delegate = self
@@ -36,8 +36,9 @@ final class MenuController: NSObject, NSMenuDelegate {
             button.target = self
             button.action = #selector(statusClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            button.imagePosition = .imageOnly
         }
-        list.model.onNeedsSetup = { [weak self] in self?.list.hide(); self?.showSetupHint() }
+        list.model.onNothingToHide = { [weak self] in self?.list.hide(); self?.showNothingToHide() }
         hider.onStateChange = { [weak self] in self?.updateIcon(); self?.list.model.objectWillChange.send() }
         hider.onSafetyRevert = { [weak self] in self?.showSafetyAlert() }
         if Settings.hidesMenuBarIcons { hider.enable(control: statusItem); list.model.hider = hider }
@@ -45,7 +46,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         if CommandLine.arguments.contains("--debug-hider-selftest") { hider.selfTest() }
         if CommandLine.arguments.contains("--debug-open-icon-list") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                guard let self, let frame = self.statusItem.button?.window?.frame else { return }
+                guard let self, let frame = self.iconFrame else { return }
                 self.list.show(anchoredTo: frame)
             }
         }
@@ -53,50 +54,50 @@ final class MenuController: NSObject, NSMenuDelegate {
 
     // MARK: значок и клики
 
+    private var iconFrame: NSRect? { statusItem.button?.window?.frame }
+
+    /// Закрашенный знак — значки спрятаны, контурный — показаны.
     private func updateIcon() {
         guard let button = statusItem.button else { return }
-        let name: String
-        if !hider.isEnabled {
-            name = "capsule.portrait.tophalf.filled"
-            button.toolTip = "Значки строки меню (правый клик — меню topbar)"
-        } else if hider.isCollapsed {
-            name = "chevron.left"
-            button.toolTip = "Значки строки меню (правый клик — меню topbar)"
-        } else {
-            name = "chevron.right"
-            button.toolTip = "Значки строки меню (правый клик — меню topbar)"
-        }
-        let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
-        button.image = (NSImage(systemSymbolName: name, accessibilityDescription: "topbar")
-            ?? NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "topbar"))?.withSymbolConfiguration(config)
-        button.image?.isTemplate = true
+        button.image = ControlIcon.image(filled: !hider.isEnabled || hider.isCollapsed)
+        var tip = "Левый клик — список значков, правый — меню topbar"
+        if hider.isEnabled { tip = (hider.isCollapsed ? "Значки спрятаны. " : "Значки показаны. ") + tip }
+        if let version = updater?.availableVersion { tip = "Доступна версия \(version). " + tip }
+        button.toolTip = tip
     }
 
     @objc private func statusClicked() {
         let event = NSApp.currentEvent
         if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
             list.hide()
-            statusItem.menu = menu
-            statusItem.button?.performClick(nil)
-            statusItem.menu = nil      // иначе левый клик снова открывал бы меню
+            guard let frame = iconFrame else { return }
+            menu.popUp(positioning: nil, at: NSPoint(x: frame.minX, y: frame.minY), in: nil)
             return
         }
-        guard let frame = statusItem.button?.window?.frame else { return }
+        guard let frame = iconFrame else { return }
         list.toggle(anchoredTo: frame)
     }
 
     private func showSetupHint() {
         let alert = NSAlert()
-        alert.messageText = "Расставьте значки один раз"
+        alert.messageText = "Как работает сворачивание значков"
         alert.informativeText = """
-            Всё, что стоит левее черты «│», прячется кнопкой «Спрятать значки» в списке (левый клик по значку «›»). \
-            Сейчас черта стоит у самого правого края, поэтому левее неё все значки.
+            Левый клик по знаку topbar открывает список значков. Кнопка «Спрятать значки» в нём прячет всё, что стоит левее знака \
+            topbar; повторное нажатие возвращает значки. Спрятанное закрывается само через \(Int(MenuBarHider.autoCollapseDelay)) с после показа.
 
-            Зажмите ⌘ и перетащите черту «│» влево — так, чтобы слева от неё остались только те значки, которые хотите прятать. \
-            Спрятанное закрывается само через \(Int(MenuBarHider.autoCollapseDelay)) с после показа.
+            Чтобы часть значков осталась на виду, зажмите ⌘ и перетащите знак topbar левее них. Чтобы прятать больше, перетащите его правее.
 
-            Меню приложения — правый клик по «›».
+            Меню приложения — правый клик по знаку.
             """
+        alert.addButton(withTitle: "Понятно")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
+    private func showNothingToHide() {
+        let alert = NSAlert()
+        alert.messageText = "Левее знака topbar нет значков"
+        alert.informativeText = "Прячется всё, что стоит левее знака topbar, а сейчас там пусто. Зажмите ⌘ и перетащите знак topbar правее значков, которые хотите прятать."
         alert.addButton(withTitle: "Понятно")
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
@@ -105,7 +106,7 @@ final class MenuController: NSObject, NSMenuDelegate {
     private func showSafetyAlert() {
         let alert = NSAlert()
         alert.messageText = "Значки возвращены на место"
-        alert.informativeText = "Значок «›» оказался левее черты «│» и спрятался бы вместе с остальными. Перетащите его с зажатым ⌘ правее черты."
+        alert.informativeText = "Знак topbar оказался там, где система не может его показать, и спрятался бы вместе с остальными. Освободите место в строке меню (закройте лишние значки) или перетащите знак topbar с зажатым ⌘ правее."
         alert.addButton(withTitle: "Понятно")
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()

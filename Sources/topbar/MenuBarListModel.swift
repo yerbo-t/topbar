@@ -13,7 +13,7 @@ final class MenuBarListModel: ObservableObject {
     private(set) var icons: [String: NSImage] = [:]
     /// Сворачивание значков (кнопка в подвале списка); nil — выключено.
     var hider: MenuBarHider?
-    var onNeedsSetup: (() -> Void)?
+    var onNothingToHide: (() -> Void)?
     var onClose: (() -> Void)?
     /// Есть новая версия приложения (nil — нет) и что сделать по кнопке «Обновить».
     @Published var updateVersion: String?
@@ -110,7 +110,7 @@ final class MenuBarListModel: ObservableObject {
 
     func toggleHiding() {
         guard let hider else { return }
-        if hider.toggle() == .needsSetup { onNeedsSetup?() }
+        if hider.toggle() == .nothingToHide { onNothingToHide?() }
         objectWillChange.send()
     }
 

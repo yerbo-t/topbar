@@ -25,7 +25,7 @@ struct MenuBarListView: View {
                 }
                 .buttonStyle(CardButtonStyle(prominent: true))
                 .padding(.horizontal, 18).padding(.bottom, 10)
-                .accessibilityHint("Прячет значки левее черты или возвращает их")
+                .accessibilityHint("Прячет значки левее знака topbar или возвращает их")
             }
             if !model.trusted {
                 accessPrompt

@@ -4,6 +4,9 @@ import CoreGraphics
 /// Что сейчас лежит в строке меню встроенного экрана. Окна значков видны через список окон без особых разрешений;
 /// чей значок — не узнать (на macOS 26 все они принадлежат «Пункту управления»), да это и не нужно: важны только места.
 enum MenuBarLayout {
+    /// Длина значка topbar в строке меню (окно значка шире на 16 пунктов отступов).
+    static let controlIconLength: CGFloat = 20
+
     /// Рамки значков в строке меню (в координатах экрана с началом слева вверху), без окон самого острова.
     static func statusItemFrames(on screen: NSScreen) -> [CGRect] {
         guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
