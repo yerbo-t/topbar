@@ -52,6 +52,7 @@ final class MenuController: NSObject, NSMenuDelegate {
         if Settings.hidesMenuBarIcons { hider.enable(control: statusItem); list.model.hider = hider }
         updateIcon()
         if CommandLine.arguments.contains("--debug-hider-selftest") { hider.selfTest() }
+        if CommandLine.arguments.contains("--debug-hider-misalign-selftest") { hider.selfTestMisaligned() }
         if CommandLine.arguments.contains("--debug-open-setup") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.showSetupGuide() }
         }
