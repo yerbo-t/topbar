@@ -218,6 +218,15 @@
   .step::before { content: counter(s); display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--pill); color: var(--pill-ink); font-weight: 700; margin-bottom: 16px; }
   .step h3 { margin: 0 0 8px; font-size: 20px; letter-spacing: -.015em; } .step p { margin: 0; color: var(--muted); font-size: 16px; }
   code { font: .9em var(--mono); padding: .15em .45em; border-radius: 8px; background: var(--line); }
+  .hint { margin: 16px auto 0; color: var(--muted); font-size: 15px; }
+  .hint a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+  .first { max-width: 760px; margin: 28px auto 0; padding: 28px 28px 26px; border-radius: 26px; border: 1px solid var(--line); background: var(--card); scroll-margin-top: 90px; }
+  .first h3 { margin: 0 0 8px; font-size: 22px; letter-spacing: -.015em; }
+  .first p { margin: 0 0 10px; color: var(--muted); font-size: 16px; }
+  .first ol { margin: 14px 0 18px; padding-left: 1.4em; color: var(--muted); font-size: 16px; }
+  .first li { margin: 8px 0; padding-left: .25em; } .first li b { color: var(--ink); font-weight: 650; }
+  .cmd { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0 12px; }
+  .cmd code { flex: 1 1 340px; min-width: 0; white-space: normal; overflow-wrap: anywhere; padding: .75em 1em; border-radius: 14px; }
 
   .faq { max-width: 780px; margin-inline: auto; display: grid; gap: 10px; }
   details { border-radius: 20px; background: var(--card); border: 1px solid var(--line); padding: 0 22px; transition: border-color .2s; }
@@ -305,6 +314,7 @@
       </a>
       <a class="btn" href="https://github.com/yerbo-t/topbar">Исходный код</a>
     </div>
+    <p class="hint fade" style="--d:.76s">При первом запуске macOS попросит подтвердить открытие. <a href="#first-run">Как это сделать</a></p>
     <ul class="facts fade" style="--d:.8s"><li>macOS 14 или новее</li><li>MacBook с вырезом</li><li>Нужен Claude Code</li></ul>
 
     <div class="demo fade" style="--d:.9s">
@@ -418,12 +428,24 @@
     <div class="wrap">
       <div class="center reveal">
         <h2>Три шага до острова.</h2>
-        <p class="sec-lead">Установка занимает минуту. Никакого терминала, кроме одного нажатия внутри самого приложения.</p>
+        <p class="sec-lead">Установка занимает минуту. Единственное, что нужно сделать руками: один раз подтвердить первый запуск в macOS.</p>
       </div>
       <div class="steps">
         <div class="step reveal"><h3>Скачайте</h3><p>Откройте образ и перетащите topbar в «Программы».</p></div>
-        <div class="step reveal" style="--d:.08s"><h3>Откройте</h3><p>macOS предупредит, что приложение не от Apple. Нажмите «Всё равно открыть» в настройках, это нужно один раз.</p></div>
-        <div class="step reveal" style="--d:.16s"><h3>Подключите Claude Code</h3><p>В меню topbar выберите «Установить хуки…»: приложение покажет, что именно изменится в настройках, и только потом запишет.</p></div>
+        <div class="step reveal" style="--d:.08s"><h3>Откройте</h3><p>macOS покажет окно «Файл topbar не был открыт»: приложение подписано автором, а не Apple. Подтвердите запуск в настройках, ниже как. Это один раз.</p></div>
+        <div class="step reveal" style="--d:.16s"><h3>Подключите Claude Code</h3><p>При первом запуске откроется окно «Настройка topbar»: оно по шагам подскажет, что включить, и само отметит готовое. Перед записью хуков вы увидите, что именно изменится.</p></div>
+      </div>
+      <div class="first reveal" id="first-run">
+        <h3>Окно «Файл topbar не был открыт»?</h3>
+        <p>Это нормально: у проекта нет платной подписи Apple, поэтому macOS просит подтвердить первый запуск. Это делается один раз:</p>
+        <ol>
+          <li>В окне нажмите <b>«Готово»</b>.</li>
+          <li>Откройте <b>«Системные настройки» → «Конфиденциальность и безопасность»</b>.</li>
+          <li>Прокрутите вниз до раздела <b>«Безопасность»</b>: там будет сообщение, что topbar заблокирован. Нажмите <b>«Всё равно открыть»</b> и введите пароль от Mac.</li>
+          <li>В следующем окне нажмите <b>«Открыть»</b>.</li>
+        </ol>
+        <p>Быстрее через Терминал: вставьте команду и нажмите Return (приложение должно лежать в папке «Программы»).</p>
+        <div class="cmd"><code id="cmd">xattr -dr com.apple.quarantine /Applications/topbar.app &amp;&amp; open /Applications/topbar.app</code><button class="btn small" type="button" id="copy">Скопировать</button></div>
       </div>
       <div class="center reveal" style="margin-top:34px"><a class="btn primary" href="/download">Скачать topbar</a></div>
     </div>
@@ -433,9 +455,9 @@
     <div class="wrap">
       <div class="center reveal"><h2>Вопросы и ответы.</h2><p class="sec-lead">Коротко о том, что спрашивают чаще всего.</p></div>
       <div class="faq">
-        <details class="reveal"><summary>Почему macOS предупреждает при первом запуске?</summary>
-          <div class="ans"><p>Приложение подписано сертификатом автора, а не Apple: у проекта нет платной подписи разработчика. Предупреждение появляется один раз.</p>
-          <p>Откройте «Системные настройки → Конфиденциальность и безопасность» и нажмите «Всё равно открыть» рядом с сообщением про topbar. Или в Терминале: <code>xattr -dr com.apple.quarantine /Applications/topbar.app</code></p></div></details>
+        <details class="reveal"><summary>Почему macOS пишет «Файл topbar не был открыт»?</summary>
+          <div class="ans"><p>Приложение подписано сертификатом автора, а не Apple: у проекта нет платной подписи разработчика. Окно появляется один раз.</p>
+          <p>Нажмите «Готово», откройте «Системные настройки → Конфиденциальность и безопасность», внизу в разделе «Безопасность» нажмите «Всё равно открыть» рядом с сообщением про topbar и введите пароль. Подробно, с командой для Терминала: <a href="#first-run">шаги выше</a>.</p></div></details>
         <details class="reveal"><summary>Что отправляется автору?</summary>
           <div class="ans"><p>По умолчанию ничего. При первом запуске приложение спросит, сообщать ли, что вы им пользуетесь, и покажет, что уйдёт: модель Mac и процессор, объём памяти, версии macOS и topbar, язык системы, случайный номер установки и имя, если введёте. Сервер при этом видит ваш IP-адрес.</p>
           <p>Содержимое сессий, файлов и проектов не отправляется никогда. Отказаться можно в меню приложения в любой момент.</p></div></details>
@@ -578,6 +600,17 @@
       if (visible) { if (current < 0) setScene(0); else scheduleNext(); } else { clearTimeout(autoplay); }
     }, { threshold: 0.35 }).observe(laptop);
   } else { visible = true; scheduleNext(); }
+})();
+</script>
+<script>
+(function () {
+  var button = document.getElementById("copy"), code = document.getElementById("cmd");
+  if (!button || !code) return;
+  button.addEventListener("click", function () {
+    var done = function () { button.textContent = "Скопировано"; setTimeout(function () { button.textContent = "Скопировать"; }, 2000); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code.textContent).then(done, function () {});
+    else { var r = document.createRange(); r.selectNodeContents(code); var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); try { document.execCommand("copy"); done(); } catch (e) {} }
+  });
 })();
 </script>
 </body>
