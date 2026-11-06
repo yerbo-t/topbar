@@ -232,7 +232,7 @@ struct RowView: View {
                 Text(secondLine).font(.system(size: 11.5)).foregroundStyle(Look.muted).lineLimit(1)
             }
             Spacer(minLength: 8)
-            Text(session.status.label)
+            Text(statusWord)
                 .font(.system(size: 11.5))
                 .foregroundStyle(session.status == .idle ? Look.muted : session.status.color)
         }
@@ -243,6 +243,12 @@ struct RowView: View {
             .fill(session.status == .waitingPermission ? Look.hot : (hovering ? Color.white.opacity(0.05) : .clear)))
         .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
+    }
+
+    /// Статус словами; когда сессия ждёт ответа на вопрос Claude, а не разрешения, так и сказано.
+    private var statusWord: String {
+        if session.status == .waitingPermission, session.queue.first?.toolName == "AskUserQuestion" { return "ждёт ответа" }
+        return session.status.label
     }
 
     /// Что сессия делает сейчас; если ничего — где она (ветка, если её не видно выше, и приложение).
@@ -315,7 +321,9 @@ struct CardView: View {
     @ObservedObject var model: IslandViewModel
 
     var body: some View {
-        if let card = model.presenter.currentCard {
+        if let card = model.presenter.currentCard, let questions = card.request.questions {
+            questionBody(card, questions: questions)
+        } else if let card = model.presenter.currentCard {
             let label = model.label(for: card.session)
             VStack(alignment: .leading, spacing: 0) {
                 Spacer().frame(height: (model.geometry?.notchHeight ?? 32) + CardMetrics.top)
@@ -360,7 +368,7 @@ struct CardView: View {
     }
 
     /// Шапка: крупно имя сессии, под ним проект · ветка · приложение; справа — очередь и субагент, если есть.
-    private func header(_ label: SessionLabel, _ card: (request: PermissionRequest, session: Session)) -> some View {
+    func header(_ label: SessionLabel, _ card: (request: PermissionRequest, session: Session)) -> some View {
         let context = (label.context + [card.session.hostApp].compactMap { $0 }).joined(separator: " · ")
         let total = model.presenter.queuedBehindCurrent + 1
         return HStack(alignment: .top, spacing: 10) {

@@ -86,4 +86,12 @@ final class AskQuestionTests: XCTestCase {
         XCTAssertNil(AskQuestions.answers(from: ["Другой вопрос?": ["Красный"]], for: questions), "чужой вопрос")
         XCTAssertNil(AskQuestions.answers(from: ["Какой цвет?": ["Красный"], "Лишний?": ["Да"]], for: questions), "лишний вопрос")
     }
+
+    // MARK: подпись в списке
+
+    func testListShowsWhatTheSessionIsDoingForQuestionTools() {
+        XCTAssertEqual(ActionDescriber.describe(toolName: "AskUserQuestion", input: nil), "Задаёт вопрос")
+        XCTAssertEqual(ActionDescriber.describe(toolName: "ExitPlanMode", input: nil), "Ждёт решения по плану")
+        XCTAssertEqual(ActionDescriber.describe(toolName: "Glob", input: nil), "Glob", "прочие инструменты — по имени, как раньше")
+    }
 }

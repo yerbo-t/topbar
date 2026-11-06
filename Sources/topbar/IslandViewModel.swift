@@ -45,6 +45,15 @@ final class IslandViewModel: ObservableObject {
     private var pinned = false
     private var hoverTask: Task<Void, Never>?
 
+    /// Ответ на вопрос Claude, который набирается на карточке: какой вопрос по счёту и что уже выбрано.
+    struct AskDraft: Equatable {
+        var requestId: String?
+        var index = 0
+        var picks: [String: [String]] = [:]
+        var questionCount = 0
+    }
+    private(set) var ask = AskDraft()
+
     let hub: SessionHub
     let system: SystemState
     var geometry: NotchGeometry?
@@ -330,6 +339,11 @@ final class IslandViewModel: ObservableObject {
             let label = label(for: card.session)
             let hasContext = !label.context.isEmpty || card.session.hostApp != nil
             let header = m.titleLine + (hasContext ? m.contextLine : 0)
+            if let questions = card.request.questions {
+                let index = min(ask.index, questions.count - 1)
+                let body = QuestionMetrics.bodyHeight(questions[index], index: index, count: questions.count)
+                return CGSize(width: m.width, height: ceil(notchH + m.top + header + m.afterHeader + body + m.beforeActions + m.actions + m.bottom))
+            }
             let question = CGFloat(m.lines(card.request.question, font: m.questionFont, limit: 2)) * m.questionLine
             let purpose = card.request.purpose.map { m.purposeGap + CGFloat(m.lines($0, font: m.purposeFont, limit: 2)) * m.purposeLine } ?? 0
             // Строки команды с переносами: сколько знаков моноширинного шрифта входит в ящик.
@@ -397,6 +411,63 @@ final class IslandViewModel: ObservableObject {
 
     func dismissCard() { apply { $0.dismissCard() } }
 
+    // MARK: ответ на вопрос Claude
+
+    private var currentQuestions: [AskQuestion]? { presenter.currentCard?.request.questions }
+
+    /// Нажат вариант. Вопрос с одним ответом: ответ принят, дальше следующий вопрос или отправка. С несколькими: отметка.
+    func askPick(_ label: String) {
+        guard let questions = currentQuestions, ask.index < questions.count else { return }
+        let question = questions[ask.index]
+        guard question.options.contains(where: { $0.label == label }) else { return }
+        if question.multiSelect {
+            var chosen = ask.picks[question.question] ?? []
+            if let i = chosen.firstIndex(of: label) { chosen.remove(at: i) } else { chosen.append(label) }
+            ask.picks[question.question] = chosen
+            askChanged(resize: false)
+        } else {
+            ask.picks[question.question] = [label]
+            askAdvance()
+        }
+    }
+
+    /// «Далее» / «Готово» у вопроса с несколькими ответами.
+    func askNext() {
+        guard let questions = currentQuestions, ask.index < questions.count,
+              !(ask.picks[questions[ask.index].question] ?? []).isEmpty else { return }
+        askAdvance()
+    }
+
+    func askBack() {
+        guard ask.index > 0 else { return }
+        ask.index -= 1
+        askChanged(resize: true)
+    }
+
+    private func askAdvance() {
+        guard let questions = currentQuestions else { return }
+        if ask.index + 1 < questions.count {
+            ask.index += 1
+            askChanged(resize: true)
+        } else {
+            submitAsk()
+        }
+    }
+
+    private func submitAsk() {
+        guard let card = presenter.currentCard else { return }
+        let id = card.request.requestId
+        hub.answer(requestId: id, picks: ask.picks) { [weak self] _ in
+            MainActor.assumeIsolated { self?.apply { $0.requestClosed(id) } }
+        }
+    }
+
+    private func askChanged(resize: Bool) {
+        if resize { recomputeLayout() }
+        withAnimation(Look.reduceMotion ? nil : .easeOut(duration: 0.15)) { objectWillChange.send() }
+        if resize { onLayoutChange?() }
+    }
+
     /// Закрыть все карточки (сон, пропал экран с вырезом): диалоги остаются в терминалах.
     func releaseCards() {
         hub.releaseAllCards()
@@ -409,6 +480,9 @@ final class IslandViewModel: ObservableObject {
         change(&next)
         let before = visibleKey(presenter, labels: labels)
         presenter = next
+        if ask.requestId != next.currentCardId {
+            ask = AskDraft(requestId: next.currentCardId, questionCount: next.currentCard?.request.questions?.count ?? 0)
+        }
         recomputeLayout()
         if CommandLine.arguments.contains("--debug") {
             FileHandle.standardError.write(Data("[island] mode=\(next.mode) summary=\"\(next.summaryText)\" sessions=\(next.sessions.map { "\($0.project):\($0.status):\($0.hostApp ?? "-")" })\n".utf8))

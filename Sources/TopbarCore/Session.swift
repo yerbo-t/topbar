@@ -120,6 +120,10 @@ public enum ActionDescriber {
             let path = input?["file_path"]?.stringValue ?? input?["notebook_path"]?.stringValue ?? ""
             let name = (path as NSString).lastPathComponent
             return name.isEmpty ? toolName : "\(toolName) \(name)"
+        case "AskUserQuestion":
+            return "Задаёт вопрос"
+        case "ExitPlanMode":
+            return "Ждёт решения по плану"
         default:
             return toolName
         }
