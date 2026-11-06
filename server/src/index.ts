@@ -21,6 +21,7 @@ const app = createApp(store, {
   adminPassword: password,
   trustedProxyHops: hops,
   clientIpHeader,
+  publicDir: "./public",
   downloadUrl,
   githubDownloads: repo ? githubDownloads(repo) : undefined,
 });

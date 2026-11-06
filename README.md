@@ -5,6 +5,8 @@
 
 Нужен Mac с вырезом, macOS 14 или новее и Claude Code.
 
+Сайт: https://topbar.finea.kz
+
 ## Установка
 
 1. Скачайте [topbar.dmg](https://topbar.finea.kz/download) (то же самое лежит в [релизах GitHub](https://github.com/yerbo-t/topbar/releases/latest)) и перетащите topbar в «Программы».

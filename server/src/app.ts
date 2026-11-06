@@ -2,8 +2,9 @@ import { Hono } from "hono";
 import { basicAuth } from "hono/basic-auth";
 import { bodyLimit } from "hono/body-limit";
 import { getConnInfo } from "@hono/node-server/conninfo";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { isIP } from "node:net";
-import type { Context } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import type { Download, GithubAsset } from "./github.ts";
 import type { FeedbackIn, FeedbackRow, Install, Ping, Store } from "./store.ts";
 
@@ -142,6 +143,8 @@ export interface Options {
    *  содержит настоящий IP, берётся он. Нужен там, где Traefik подменяет X-Forwarded-For адресом своего соседа. Включать только
    *  когда служба доступна лишь через этот прокси: напрямую заголовок подделывается. Не задан — не используется. */
   clientIpHeader?: string;
+  /** Папка со страницей-витриной (index.html и assets/), путь от текущего каталога процесса; не задана — витрины нет. */
+  publicDir?: string;
   /** Куда ведёт /download (последний релиз на GitHub). */
   downloadUrl?: string;
   /** Счётчики скачиваний с GitHub для страницы администратора (null — не подключены). */
@@ -194,6 +197,20 @@ export function createApp(store: Store, options: Options): Hono {
   const tooLarge = bodyLimit({ maxSize: 8 * 1024, onError: (c) => c.json({ error: "too large" }, 413) });
 
   app.get("/health", (c) => c.json({ ok: true }));
+
+  if (options.publicDir) {
+    const root = options.publicDir;
+    const cached = (seconds: number): MiddlewareHandler => async (c, next) => {
+      await next();
+      if (c.res.status === 200) {
+        c.res.headers.set("Cache-Control", `public, max-age=${seconds}`);
+        c.res.headers.set("X-Content-Type-Options", "nosniff");
+        c.res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+      }
+    };
+    app.get("/", cached(300), serveStatic({ root, path: "index.html" }));
+    app.get("/assets/*", cached(86400), serveStatic({ root }));
+  }
 
   app.post("/api/ping", tooLarge, async (c) => {
     const ip = admit(c);

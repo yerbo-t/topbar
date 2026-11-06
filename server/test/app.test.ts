@@ -153,3 +153,21 @@ test("забыть установку удаляет и её отзывы", () =
   assert.equal(store.count(), 0);
   assert.equal(store.feedbackCount(), 0);
 });
+
+test("витрина: главная и картинки отдаются, посторонние пути нет", async () => {
+  const app = createApp(new Store(":memory:"), { adminPassword: "correct-horse-battery", publicDir: "./public" });
+  const home = await app.request("/");
+  assert.equal(home.status, 200);
+  assert.match(home.headers.get("content-type") ?? "", /text\/html/);
+  const html = await home.text();
+  assert.ok(html.includes('href="/download"'), "на странице есть кнопка скачивания");
+  assert.equal(home.headers.get("x-content-type-options"), "nosniff");
+  const icon = await app.request("/assets/icon-light.png");
+  assert.equal(icon.status, 200);
+  assert.match(icon.headers.get("content-type") ?? "", /image\/png/);
+  assert.equal((await app.request("/assets/нет-такого.png")).status, 404);
+  assert.notEqual((await app.request("/assets/../package.json")).status, 200, "выйти за папку витрины нельзя");
+  assert.notEqual((await app.request("/assets/%2e%2e/package.json")).status, 200, "и закодированным путём тоже");
+  const bare = createApp(new Store(":memory:"), { adminPassword: "correct-horse-battery" });
+  assert.equal((await bare.request("/")).status, 404, "без publicDir витрины нет");
+});
