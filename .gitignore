@@ -19,3 +19,6 @@ build/
 
 # Сборки выпусков (zip, dmg, лента) — выкладываются отдельным шагом
 /release/
+
+# Личные заметки для Claude Code
+CLAUDE.local.md
