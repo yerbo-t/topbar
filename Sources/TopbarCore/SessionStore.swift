@@ -7,18 +7,39 @@ public enum StoreEffect: Equatable, Sendable {
     case sessionRemoved(sessionId: String)
 }
 
-/// Автомат статусов сессий. Чистая логика без ввода-вывода: время и ветку подают снаружи.
+/// Подпись сессии: крупно — имя сессии (или проект, если имени нет), мелко — проект и ветка.
+public struct SessionLabel: Equatable, Sendable {
+    /// Крупная строка: имя сессии или проект; одинаковые различаются суффиксом « #2».
+    public var title: String
+    /// Проект, если крупно стоит имя сессии; nil — крупно уже проект.
+    public var project: String?
+    public var branch: String?
+
+    public init(title: String, project: String?, branch: String?) {
+        self.title = title
+        self.project = project
+        self.branch = branch
+    }
+
+    /// Мелкая строка под крупной: «проект · ветка» (или только ветка).
+    public var context: [String] { [project, branch].compactMap { $0 } }
+}
+
+/// Автомат статусов сессий. Чистая логика без ввода-вывода: время, ветку и имя сессии подают снаружи.
 public struct SessionStore {
     public private(set) var sessions: [String: Session] = [:]
     private let branchProvider: (String) -> String?
+    /// Имя сессии по пути к её журналу.
+    private let nameProvider: (String) -> String?
 
     /// Запрос, висящий дольше этого срока, закрывается следующим `PreToolUse` той же сессии:
     /// пока диалог открыт, сессия не может начать новый инструмент (параллельные вызовы
     /// стартуют вместе с первым, то есть в первые секунды).
     public static let staleRequestAge: TimeInterval = 3
 
-    public init(branchProvider: @escaping (String) -> String? = { _ in nil }) {
+    public init(branchProvider: @escaping (String) -> String? = { _ in nil }, nameProvider: @escaping (String) -> String? = { _ in nil }) {
         self.branchProvider = branchProvider
+        self.nameProvider = nameProvider
     }
 
     // MARK: события хуков
@@ -71,7 +92,10 @@ public struct SessionStore {
         if let tty = msg.tty { s.tty = tty }
         if !msg.hints.isEmpty, s.hints != msg.hints { s.hints = msg.hints }
         if let mode = ev.permissionMode { s.permissionMode = mode }
+        if let path = ev.transcriptPath, !path.isEmpty { s.transcriptPath = path }
         s.lastEventAt = now
+        // Впервые видим сессию (в том числе после перезапуска topbar посреди неё): ветка и имя нужны сразу.
+        if isNew { refreshLabels(&s) }
 
         switch ev.hookEventName {
         case "SessionStart":
@@ -81,7 +105,7 @@ public struct SessionStore {
                 s.running = []
                 s.currentAction = ""
             }
-            refreshBranch(&s)
+            refreshLabels(&s)
 
         case "UserPromptSubmit":
             effects += closeAll(&s)
@@ -89,7 +113,7 @@ public struct SessionStore {
             s.unseenDone = false
             s.running = []
             s.currentAction = "Думает"
-            refreshBranch(&s)
+            refreshLabels(&s)
 
         case "PreToolUse":
             // Сессия начала новый инструмент → висящие давно запросы уже решены в терминале.
@@ -123,8 +147,11 @@ public struct SessionStore {
                 agentType: ev.agentType,
                 toolUseId: match?.toolUseId,
                 receivedAt: now,
-                cardable: PermissionPolicy.intercepts(toolName: ev.toolName)
+                cardable: PermissionPolicy.intercepts(toolName: ev.toolName),
+                question: ActionDescriber.question(toolName: ev.toolName, input: ev.toolInput),
+                purpose: ActionDescriber.purpose(toolName: ev.toolName, input: ev.toolInput)
             )
+            if !isNew { refreshLabels(&s) }   // карточке — свежее имя (владелец мог переименовать сессию)
             s.queue.append(request)
             s.status = .waitingPermission
             effects.append(.requestOpened(request))
@@ -159,7 +186,7 @@ public struct SessionStore {
             s.unseenDone = true
             s.running = []
             s.currentAction = ""
-            refreshBranch(&s)
+            refreshLabels(&s)
             effects.append(.sessionBecameDone(sessionId: s.sessionId))
 
         case "StopFailure":
@@ -283,6 +310,29 @@ public struct SessionStore {
         return result
     }
 
+    /// Подписи сессий: крупно имя сессии (нет имени — проект), мелко проект и ветка. Одинаковые крупные строки при одинаковом
+    /// окружении различаются суффиксом « #2», « #3» по порядку появления.
+    public static func displayLabels(_ sessions: [Session]) -> [String: SessionLabel] {
+        func base(_ s: Session) -> SessionLabel {
+            if let name = s.name, !name.isEmpty { return SessionLabel(title: name, project: s.project, branch: s.branch) }
+            return SessionLabel(title: s.project, project: nil, branch: s.branch)
+        }
+        var result: [String: SessionLabel] = [:]
+        let groups = Dictionary(grouping: sessions) { s -> [String] in
+            let label = base(s)
+            return [label.title, label.project ?? "", label.branch ?? ""]
+        }
+        for (_, group) in groups {
+            let ordered = group.sorted { ($0.firstSeenAt, $0.sessionId) < ($1.firstSeenAt, $1.sessionId) }
+            for (i, s) in ordered.enumerated() {
+                var label = base(s)
+                if i > 0 { label.title += " #\(i + 1)" }
+                result[s.sessionId] = label
+            }
+        }
+        return result
+    }
+
     /// Приложение-хост по идентификатору приложения (`__CFBundleIdentifier`), а если его нет — по `TERM_PROGRAM`.
     public static func hostName(_ termProgram: String?, bundleId: String? = nil) -> String? {
         TerminalHost.name(termProgram: termProgram, bundleId: bundleId)
@@ -327,8 +377,9 @@ public struct SessionStore {
         )
     }
 
-    private func refreshBranch(_ s: inout Session) {
+    private func refreshLabels(_ s: inout Session) {
         if !s.projectRoot.isEmpty { s.branch = branchProvider(s.projectRoot) }
+        if let path = s.transcriptPath, let name = nameProvider(path) { s.name = name }
     }
 
     private func closeAll(_ s: inout Session) -> [StoreEffect] {

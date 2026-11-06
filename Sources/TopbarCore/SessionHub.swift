@@ -35,9 +35,10 @@ public final class SessionHub {
         staleToolAfter: TimeInterval = 20,
         callbackQueue: DispatchQueue = DispatchQueue(label: "topbar.hub.callbacks"),
         branchProvider: @escaping (String) -> String? = BranchReader.branch(at:),
+        nameProvider: @escaping (String) -> String? = SessionNameReader().name(at:),
         hasChildProcess: @escaping (Session) -> Bool = { $0.pid <= 0 || !ProcessProbe.childPids(of: $0.pid).isEmpty }
     ) {
-        self.store = SessionStore(branchProvider: branchProvider)
+        self.store = SessionStore(branchProvider: branchProvider, nameProvider: nameProvider)
         self.livenessInterval = livenessInterval
         self.staleToolAfter = staleToolAfter
         self.callbackQueue = callbackQueue

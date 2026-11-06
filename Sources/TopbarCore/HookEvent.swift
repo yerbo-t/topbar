@@ -15,6 +15,8 @@ public struct HookEvent: Codable, Equatable, Sendable {
     public var notificationType: String?
     public var toolUseId: String?
     public var agentType: String?
+    /// Журнал сессии (`~/.claude/projects/…/<session>.jsonl`): из него берётся только имя сессии.
+    public var transcriptPath: String?
 
     enum CodingKeys: String, CodingKey {
         case hookEventName = "hook_event_name"
@@ -28,6 +30,7 @@ public struct HookEvent: Codable, Equatable, Sendable {
         case notificationType = "notification_type"
         case toolUseId = "tool_use_id"
         case agentType = "agent_type"
+        case transcriptPath = "transcript_path"
     }
 
     public init(
@@ -43,7 +46,8 @@ public struct HookEvent: Codable, Equatable, Sendable {
         isInterrupt: Bool? = nil,
         notificationType: String? = nil,
         toolUseId: String? = nil,
-        agentType: String? = nil
+        agentType: String? = nil,
+        transcriptPath: String? = nil
     ) {
         self.hookEventName = name
         self.sessionId = sessionId
@@ -58,6 +62,7 @@ public struct HookEvent: Codable, Equatable, Sendable {
         self.notificationType = notificationType
         self.toolUseId = toolUseId
         self.agentType = agentType
+        self.transcriptPath = transcriptPath
     }
 
     /// Облегчённая копия для событий, которым не нужен полный ввод инструмента:
