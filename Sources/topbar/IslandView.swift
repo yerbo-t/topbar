@@ -173,9 +173,13 @@ struct ListView: View {
     var body: some View {
         VStack(spacing: 0) {
             Spacer().frame(height: (model.geometry?.notchHeight ?? 32) + 6)
-            let offset = model.presenter.mediaActive ? 1 : 0
+            let playerSlots = model.presenter.mediaActive ? 1 : 0
+            let offset = playerSlots + ((model.icons?.pinnedRow.isEmpty ?? true) ? 0 : 1)
             if model.presenter.mediaActive {
                 PlayerView(model: model).riseIn(0)
+            }
+            if let icons = model.icons, !icons.pinnedRow.isEmpty {
+                PinnedRowView(icons: icons) { model.pressPinned($0) }.riseIn(playerSlots)
             }
             ForEach(Array(model.presenter.sessions.enumerated()), id: \.element.sessionId) { index, session in
                 Button { model.rowTapped(session) } label: { RowView(session: session, label: model.label(for: session)) }
@@ -183,8 +187,11 @@ struct ListView: View {
                     .riseIn(index + offset)
             }
             HStack {
-                if !model.presenter.sessions.isEmpty {
-                    Text("\(model.presenter.sessions.count) \(plural(model.presenter.sessions.count))")
+                let count = model.presenter.sessions.isEmpty ? nil : "\(model.presenter.sessions.count) \(plural(model.presenter.sessions.count))"
+                if let icons = model.icons {
+                    ListFooterInfo(countText: count, icons: icons)
+                } else if let count {
+                    Text(count)
                 }
                 Spacer()
                 Button("Свернуть") { model.collapse() }.buttonStyle(QuietButtonStyle(compact: true))

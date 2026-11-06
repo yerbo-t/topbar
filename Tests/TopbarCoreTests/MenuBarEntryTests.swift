@@ -18,6 +18,19 @@ final class MenuBarEntryTests: XCTestCase {
         XCTAssertTrue(sections.hidden.isEmpty)
     }
 
+    func testPinnedRowHoldsOnlyPinnedFoundIconsInOwnersOrder() {
+        let items = [entry("a", x: 900), entry("b", x: 1000), entry("c", x: 1100)]
+        XCTAssertEqual(ids(MenuBarOrdering.pinnedRow(items, prefs: MenuBarPrefs(pinned: ["c", "gone", "a"]))), ["c", "a"])
+        XCTAssertTrue(MenuBarOrdering.pinnedRow(items, prefs: MenuBarPrefs()).isEmpty, "нет закреплённых — ряда нет")
+    }
+
+    func testPinnedRowIsLimited() {
+        let items = (0..<12).map { entry("i\($0)", x: 900 + Double($0) * 40) }
+        let row = MenuBarOrdering.pinnedRow(items, prefs: MenuBarPrefs(pinned: items.map(\.id)))
+        XCTAssertEqual(row.count, MenuBarOrdering.pinnedRowLimit)
+        XCTAssertEqual(ids(row), (0..<MenuBarOrdering.pinnedRowLimit).map { "i\($0)" }, "остаются первые по порядку владельца")
+    }
+
     func testMissingPinnedIsSkippedAndDuplicatesDoNotRepeat() {
         let items = [entry("a", x: 900), entry("b", x: 1000)]
         let sections = MenuBarOrdering.sections(items, prefs: MenuBarPrefs(pinned: ["zzz", "a", "a"]))

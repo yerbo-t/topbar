@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model = IslandViewModel(hub: hub, system: system)
         panel = IslandPanelController(model: model)
         menu = MenuController()
+        model.icons = menu.iconModel
         menu.onPlayerToggle = { [weak self] on in self?.model.setPlayerEnabled(on) }
         menu.updater = updater
         menu.telemetry = telemetry

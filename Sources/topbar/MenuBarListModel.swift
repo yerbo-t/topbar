@@ -21,6 +21,9 @@ final class MenuBarListModel: ObservableObject {
     /// Показать меню приложения (кнопка «Меню» в подвале).
     var onShowMenu: (() -> Void)?
     var onClose: (() -> Void)?
+    /// Значок нажат успешно (нажимали из ряда закреплённых на острове — остров сворачивается).
+    var onPressed: (() -> Void)?
+    private var refreshedAt = Date.distantPast
     /// Есть новая версия приложения (nil — нет) и что сделать по кнопке «Обновить».
     @Published var updateVersion: String?
     var onUpdate: (() -> Void)?
@@ -59,6 +62,8 @@ final class MenuBarListModel: ObservableObject {
     }
 
     var sections: MenuBarSections { MenuBarOrdering.sections(entries, prefs: prefs) }
+    /// Закреплённые значки для ряда на острове (без доступа к строке меню значков нет — ряда тоже).
+    var pinnedRow: [MenuBarEntry] { trusted ? MenuBarOrdering.pinnedRow(entries, prefs: prefs) : [] }
     /// В строке меню этих значков сейчас не видно (под вырезом или спрятаны кнопкой сворачивания).
     var notVisibleCount: Int { entries.filter { $0.visibility != .visible }.count }
 
@@ -74,7 +79,14 @@ final class MenuBarListModel: ObservableObject {
         return height
     }
 
+    /// Для острова: значки подгружаются, когда раскрывается список, но не чаще раза в три секунды (наведение раскрывает его часто).
+    func refreshIfStale() {
+        guard Date().timeIntervalSince(refreshedAt) > 3 else { return }
+        refresh()
+    }
+
     func refresh() {
+        refreshedAt = Date()
         for (key, seconds) in pendingUsed { prefs.markUsed(key, at: Date(timeIntervalSince1970: seconds)) }
         pendingUsed = [:]
         trusted = MenuBarItemsProvider.isTrusted
@@ -167,7 +179,7 @@ final class MenuBarListModel: ObservableObject {
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         guard let self else { return }
-                        if ok { self.onClose?(); return }
+                        if ok { self.onClose?(); self.onPressed?(); return }
                         self.message = switch visibility {
                         case .underNotch: "Система сейчас не показывает этот значок: правее выреза не хватает места. Освободите место — закройте приложение или спрячьте значки."
                         case .pushedOff: "Значок остаётся за краем экрана. Разверните значки кнопкой внизу списка."

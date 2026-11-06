@@ -18,6 +18,8 @@ final class MenuController: NSObject, NSMenuDelegate {
     }()
     private let hider = MenuBarHider()
     private let list = MenuBarListController()
+    /// Значки строки меню: их же показывает ряд закреплённых на острове.
+    var iconModel: MenuBarListModel { list.model }
     /// Владелец включил или выключил плеер в меню.
     var onPlayerToggle: ((Bool) -> Void)?
     /// Обновления (nil — не настроены в этой сборке).

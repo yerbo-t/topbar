@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import TopbarCore
 
@@ -53,6 +54,19 @@ final class IslandViewModel: ObservableObject {
         var questionCount = 0
     }
     private(set) var ask = AskDraft()
+
+    /// Значки строки меню: из них собирается ряд закреплённых над списком сессий (nil — не подключено).
+    var icons: MenuBarListModel? {
+        didSet {
+            iconsObserver = icons?.objectWillChange.sink { [weak self] _ in
+                // Изменение приходит до того, как значения обновились: пересчёт — на следующем обороте.
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.iconsChanged() } }
+            }
+            icons?.onPressed = { [weak self] in self?.collapse() }
+        }
+    }
+    private var iconsObserver: AnyCancellable?
+    private var lastPinnedRowCount = 0
 
     let hub: SessionHub
     let system: SystemState
@@ -332,7 +346,8 @@ final class IslandViewModel: ObservableObject {
         case .list:
             let rows = CGFloat(presenter.sessions.count)
             let player = presenter.mediaActive ? PlayerView.height : 0
-            return CGSize(width: Self.listWidth, height: notchH + 10 + player + rows * 54 + 44)
+            let pinned = pinnedRowCount > 0 ? PinnedRowView.height : 0
+            return CGSize(width: Self.listWidth, height: notchH + 10 + player + pinned + rows * 54 + 44)
         case .card:
             guard let card = presenter.currentCard else { return .zero }
             let m = CardMetrics.self
@@ -411,6 +426,23 @@ final class IslandViewModel: ObservableObject {
 
     func dismissCard() { apply { $0.dismissCard() } }
 
+    // MARK: ряд закреплённых значков
+
+    var pinnedRowCount: Int { icons?.pinnedRow.count ?? 0 }
+
+    /// Значки или закреплённое поменялись: ряд мог появиться, исчезнуть или сменить состав.
+    private func iconsChanged() {
+        guard presenter.mode == .list else { lastPinnedRowCount = pinnedRowCount; return }
+        let count = pinnedRowCount
+        recomputeLayout()
+        withAnimation(Look.reduceMotion ? nil : .easeOut(duration: 0.15)) { objectWillChange.send() }
+        if count != lastPinnedRowCount { onLayoutChange?() }
+        lastPinnedRowCount = count
+    }
+
+    /// Нажать закреплённый значок (спрятанный сворачиванием — после возврата значков).
+    func pressPinned(_ entry: MenuBarEntry) { icons?.press(entry) }
+
     // MARK: ответ на вопрос Claude
 
     private var currentQuestions: [AskQuestion]? { presenter.currentCard?.request.questions }
@@ -479,7 +511,12 @@ final class IslandViewModel: ObservableObject {
         var next = presenter
         change(&next)
         let before = visibleKey(presenter, labels: labels)
+        let opensList = presenter.mode != .list && next.mode == .list
         presenter = next
+        if opensList, let icons {
+            icons.message = nil
+            icons.refreshIfStale()
+        }
         if ask.requestId != next.currentCardId {
             ask = AskDraft(requestId: next.currentCardId, questionCount: next.currentCard?.request.questions?.count ?? 0)
         }
