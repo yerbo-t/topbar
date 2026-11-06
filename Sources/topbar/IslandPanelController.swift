@@ -40,9 +40,21 @@ final class IslandPanelController {
         timer.tolerance = 1
         RunLoop.main.add(timer, forMode: .common)
         spaceTimer = timer
+        // Другое приложение — другие меню слева от выреза: место перемеряем сразу, не дожидаясь таймера.
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                MainActor.assumeIsolated {
+                    guard let self, self.model.mode == .collapsed else { return }
+                    if self.model.refreshMenuBarSpace(force: true, immediate: true) { self.layout() }
+                }
+            }
+        }
     }
 
     private var spaceTimer: Timer?
+    private var activationObserver: NSObjectProtocol?
 
     private var settleWork: DispatchWorkItem?
     private var hideCheck: DispatchWorkItem?

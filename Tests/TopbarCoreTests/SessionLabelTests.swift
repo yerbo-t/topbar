@@ -140,6 +140,17 @@ final class SessionLabelTests: XCTestCase {
         XCTAssertEqual(request?.detail, "rm -rf build", "сама команда — целиком и без изменений")
     }
 
+    func testEditIsShownAsChangeNotJson() {
+        let edit: JSONValue = .object(["file_path": .string("/w/a.swift"), "old_string": .string("let a = 1\nlet b = 2"), "new_string": .string("let a = 3")])
+        XCTAssertEqual(ActionDescriber.detail(toolName: "Edit", input: edit), "- let a = 1\n- let b = 2\n+ let a = 3")
+        let multi: JSONValue = .object(["file_path": .string("/w/a.swift"), "edits": .array([
+            .object(["old_string": .string("x"), "new_string": .string("y"), "replace_all": .bool(true)]),
+            .object(["old_string": .string("p"), "new_string": .string("")]),
+        ])])
+        XCTAssertEqual(ActionDescriber.detail(toolName: "MultiEdit", input: multi), "- x\n+ y\n(во всех местах файла)\n\n- p")
+        XCTAssertEqual(ActionDescriber.detail(toolName: "Write", input: .object(["file_path": .string("/w/a.md"), "content": .string("# Hi")])), "# Hi")
+    }
+
     func testHookEventDecodesTranscriptPath() throws {
         let json = #"{"session_id":"abc","transcript_path":"/x/abc.jsonl","hook_event_name":"Stop"}"#
         let event = try JSONDecoder().decode(HookEvent.self, from: Data(json.utf8))

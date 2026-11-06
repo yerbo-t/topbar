@@ -126,6 +126,10 @@ public enum ActionDescriber {
         var text: String
         if toolName == "Bash", let command = input?["command"]?.stringValue {
             text = command
+        } else if let change = editDiff(toolName: toolName, input: input) {
+            text = change
+        } else if toolName == "Write", let content = input?["content"]?.stringValue {
+            text = content.isEmpty ? "(пустой файл)" : content
         } else if let input, let data = try? Self.encoder.encode(input) {
             text = String(decoding: data, as: UTF8.self)
         } else {
@@ -133,6 +137,27 @@ public enum ActionDescriber {
         }
         if text.count > limit { text = String(text.prefix(limit)) + "\n… показано не всё" }
         return text
+    }
+
+    /// Правка файла как разница: строки «- было», «+ станет» (путь — в пояснении под вопросом). nil — не правка.
+    static func editDiff(toolName: String?, input: JSONValue?) -> String? {
+        func one(_ edit: JSONValue?) -> String? {
+            guard let old = edit?["old_string"]?.stringValue, let new = edit?["new_string"]?.stringValue else { return nil }
+            func mark(_ text: String, _ sign: String) -> String {
+                text.split(separator: "\n", omittingEmptySubsequences: false).map { sign + " " + $0 }.joined(separator: "\n")
+            }
+            var parts = [old.isEmpty ? nil : mark(old, "-"), new.isEmpty ? nil : mark(new, "+")].compactMap { $0 }
+            if case .bool(true)? = edit?["replace_all"] { parts.append("(во всех местах файла)") }
+            return parts.joined(separator: "\n")
+        }
+        switch toolName {
+        case "Edit": return one(input)
+        case "MultiEdit":
+            guard case .array(let edits)? = input?["edits"] else { return nil }
+            let all = edits.compactMap { one($0) }
+            return all.isEmpty ? nil : all.joined(separator: "\n\n")
+        default: return nil
+        }
     }
 
     /// Вопрос карточки: что именно владелец разрешает, словами, а не именем инструмента.

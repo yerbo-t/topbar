@@ -13,17 +13,13 @@ enum Look {
     static let code = Color(red: 0.863, green: 0.867, blue: 0.886)           // #dcdde2
     static let tool = Color(red: 0.478, green: 0.635, blue: 1.0)             // #7aa2ff
     static let muted = Color(red: 0.663, green: 0.671, blue: 0.710)          // #a9abb5
+    /// Строки правки файла: что уходит и что приходит (светлые, чтобы читались на тёмном ящике).
+    static let removed = Color(red: 1.0, green: 0.553, blue: 0.533)          // #ff8d88
+    static let added = Color(red: 0.494, green: 0.871, blue: 0.616)          // #7ede9d
     /// Подсветка строки, которой нужно внимание.
     static let hot = Color.white.opacity(0.08)
 
     static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
-}
-
-/// Подпись сессии «проект · ветка»: проект крупно, ветка рядом спокойным цветом (как в демо на сайте).
-func sessionTitle(_ title: String, size: CGFloat) -> Text {
-    guard let range = title.range(of: " · ") else { return Text(title).font(.system(size: size, weight: .semibold)) }
-    return Text(title[..<range.lowerBound]).font(.system(size: size, weight: .semibold))
-        + Text(" · " + String(title[range.upperBound...])).font(.system(size: size - 2)).foregroundColor(Look.muted)
 }
 
 /// Кнопка-таблетка: зелёная «Разрешить», тёмная с тонкой рамкой «Отклонить», светлая для крупных действий. При нажатии

@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import CoreGraphics
 
 /// Что сейчас лежит в строке меню встроенного экрана. Окна значков видны через список окон без особых разрешений;
@@ -46,5 +47,49 @@ enum MenuBarLayout {
             .filter { $0 >= notchRight - 1 }
         guard let first = starts.min() else { return .unlimited }
         return .points(max(0, first - notchRight))
+    }
+
+    /// Свободное место слева от выреза: от правого края последнего меню приложения, которому сейчас принадлежит строка меню
+    /// («Справка» у большинства), до выреза. Меню — не окна: их видно только через «Универсальный доступ»; без него — `.unknown`
+    /// (уши ведут себя как раньше). Положение берётся относительно левого края экрана, на котором меню нарисованы: на всех
+    /// экранах они лежат одинаково.
+    static func freeSpaceLeftOfNotch(on screen: NSScreen, notchWidth: CGFloat) -> FreeSpace {
+        guard AXIsProcessTrusted(),
+              let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
+              let app = NSWorkspace.shared.menuBarOwningApplication else { return .unknown }
+        let display = CGDisplayBounds(id)
+        let notchLeft = display.midX - notchWidth / 2
+        let element = AXUIElementCreateApplication(app.processIdentifier)
+        // Зависшее приложение не должно подвешивать остров: ответа ждём недолго.
+        AXUIElementSetMessagingTimeout(element, 0.15)
+        guard let bar = axAttribute(element, kAXMenuBarAttribute), CFGetTypeID(bar) == AXUIElementGetTypeID(),
+              let items = axAttribute(bar as! AXUIElement, kAXChildrenAttribute) as? [AXUIElement] else { return .unknown }
+        for item in items.reversed() {
+            guard let frame = axFrame(item), frame.width > 0 else { continue }
+            // Экран, на котором лежит это меню (строка меню может быть на другом мониторе).
+            var shown: CGDirectDisplayID = 0, count: UInt32 = 0
+            let origin = CGDisplayBounds(CGGetDisplaysWithPoint(CGPoint(x: frame.midX, y: frame.midY), 1, &shown, &count) == .success && count > 0 ? shown : id).minX
+            let maxX = display.minX + (frame.maxX - origin)
+            // Меню, которые система убрала за вырез (не поместились), не считаются.
+            guard display.minX + (frame.minX - origin) < notchLeft else { continue }
+            return .points(max(0, notchLeft - maxX))
+        }
+        return .unlimited
+    }
+
+    private static func axAttribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+        var value: CFTypeRef?
+        return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+    }
+
+    private static func axFrame(_ element: AXUIElement) -> CGRect? {
+        var values: CFArray?
+        guard AXUIElementCopyMultipleAttributeValues(element, [kAXPositionAttribute, kAXSizeAttribute] as CFArray, [], &values) == .success,
+              let list = values as? [AnyObject], list.count == 2 else { return nil }
+        var point = CGPoint.zero, size = CGSize.zero
+        let pos = list[0] as CFTypeRef, dim = list[1] as CFTypeRef
+        guard CFGetTypeID(pos) == AXValueGetTypeID(), AXValueGetValue(pos as! AXValue, .cgPoint, &point),
+              CFGetTypeID(dim) == AXValueGetTypeID(), AXValueGetValue(dim as! AXValue, .cgSize, &size) else { return nil }
+        return CGRect(origin: point, size: size)
     }
 }
