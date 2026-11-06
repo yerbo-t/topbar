@@ -96,6 +96,7 @@ struct MenuBarListView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 16) {
+                Button("Меню") { model.onShowMenu?() }
                 Spacer(minLength: 0)
                 Button("Закрыть") { model.onClose?() }
             }

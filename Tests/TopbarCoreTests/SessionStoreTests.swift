@@ -274,7 +274,26 @@ final class SessionStoreTests: XCTestCase {
         store.apply(m, now: now)
         XCTAssertEqual(store.sessions["s1"]?.hostApp, "VS Code", "расширение VS Code: нет TERM_PROGRAM, есть приложение")
         XCTAssertEqual(SessionStore.hostName(nil, bundleId: "com.mitchellh.ghostty"), "Ghostty")
-        XCTAssertNil(SessionStore.hostName(nil, bundleId: "com.apple.Terminal"))
+        XCTAssertEqual(SessionStore.hostName(nil, bundleId: "com.apple.Terminal"), "Terminal")
         XCTAssertEqual(SessionStore.hostName("vscode", bundleId: nil), "VS Code")
+    }
+
+    func testSessionRemembersHostBundleId() {
+        var m = Fx.msg("UserPromptSubmit", term: "iTerm.app")
+        store.apply(m, now: now)
+        XCTAssertEqual(store.sessions["s1"]?.hostApp, "iTerm2")
+        XCTAssertEqual(store.sessions["s1"]?.hostBundleId, "com.googlecode.iterm2", "идентификатор берётся из TERM_PROGRAM, если приложение не сообщено")
+        m.hostBundleId = "com.apple.Terminal"
+        store.apply(m, now: now)
+        XCTAssertEqual(store.sessions["s1"]?.hostBundleId, "com.apple.Terminal", "сообщённое приложение важнее TERM_PROGRAM")
+        XCTAssertEqual(store.sessions["s1"]?.hostApp, "Terminal")
+    }
+
+    func testUnknownHostBundleIdIsKeptForTheWindowLayer() {
+        var m = Fx.msg("UserPromptSubmit", term: nil)
+        m.hostBundleId = "com.example.NewTerminal"
+        store.apply(m, now: now)
+        XCTAssertEqual(store.sessions["s1"]?.hostBundleId, "com.example.NewTerminal")
+        XCTAssertNil(store.sessions["s1"]?.hostApp)
     }
 }

@@ -13,8 +13,6 @@ final class MenuBarHider {
 
     /// Длина выталкивателя в свёрнутом виде. Система сама обрезает её (на этом Mac — до ~5000), но и этого хватает.
     static let hiddenLength: CGFloat = 10000
-    /// Через сколько секунд развёрнутые значки прячутся сами.
-    static let autoCollapseDelay: TimeInterval = 10
 
     /// Имена для сохранения положения значков. Пока владелец их не двигал, знак ставится у правого края (рядом с «Пунктом
     /// управления»): на Mac с вырезом слева места нет, система роняет самые левые значки, а новые по умолчанию встают
@@ -37,7 +35,6 @@ final class MenuBarHider {
 
     private weak var control: NSStatusItem?
     private var pusher: NSStatusItem?
-    private var autoCollapse: DispatchWorkItem?
     private var resync: DispatchWorkItem?
     private var syncedControlPosition: Double?
     private var moveObserver: NSObjectProtocol?
@@ -61,7 +58,7 @@ final class MenuBarHider {
         }
         onStateChange?()
         // Если в прошлый раз значки были спрятаны — прячем и сейчас, когда система разложила значки. Строка меню может быть
-        // спрятана (полный экран) — тогда повторяем позже.
+        // спрятана (полный экран) — тогда повторяем позже. Сами по себе значки больше не прячутся: только по клику владельца.
         guard UserDefaults.standard.bool(forKey: Self.collapsedKey) else { return }
         for delay in [0.8, 10.0] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -72,7 +69,6 @@ final class MenuBarHider {
     }
 
     func disable() {
-        autoCollapse?.cancel()
         resync?.cancel()
         if let token = moveObserver { NotificationCenter.default.removeObserver(token); moveObserver = nil }
         if let item = pusher { NSStatusBar.system.removeStatusItem(item); pusher = nil }
@@ -99,7 +95,6 @@ final class MenuBarHider {
         isCollapsed = collapsed
         UserDefaults.standard.set(collapsed, forKey: Self.collapsedKey)
         applyLength()
-        autoCollapse?.cancel()
         if collapsed {
             // Если знак оказался левее выталкивателя, он уехал за экран вместе со всем остальным — вернём всё.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
@@ -107,23 +102,8 @@ final class MenuBarHider {
                 self.setCollapsed(false)
                 self.onSafetyRevert?()
             }
-        } else {
-            scheduleAutoCollapse()
         }
         onStateChange?()
-    }
-
-    /// Продлить показ значков (владелец взаимодействует с ними).
-    func extendExpanded() {
-        guard !isCollapsed, isEnabled else { return }
-        scheduleAutoCollapse()
-    }
-
-    private func scheduleAutoCollapse() {
-        autoCollapse?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.setCollapsed(true) }
-        autoCollapse = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.autoCollapseDelay, execute: work)
     }
 
     // MARK: выталкиватель рядом со знаком
@@ -158,7 +138,7 @@ final class MenuBarHider {
 
     // MARK: самопроверка (`--debug-hider-selftest`)
 
-    /// Прогон без участия владельца: сворачивание, возврат и автосворачивание. Результат — в stderr. Строка меню должна быть
+    /// Прогон без участия владельца: сворачивание, возврат и проверка, что само ничего не сворачивается. Результат — в stderr. Строка меню должна быть
     /// видна (иначе не разглядеть значки): в полноэкранном режиме подведите мышь к верхнему краю.
     func selfTest() {
         func log(_ text: String) { FileHandle.standardError.write(Data("[hider-selftest] \(text)\n".utf8)) }
@@ -176,8 +156,8 @@ final class MenuBarHider {
                     setCollapsed(false)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [self] in
                         frames("после разворачивания")
-                        DispatchQueue.main.asyncAfter(deadline: .now() + Self.autoCollapseDelay + 1) { [self] in
-                            frames("через \(Int(Self.autoCollapseDelay)) с (должно свернуться само)")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [self] in
+                            frames("через 12 с (само не сворачивается: должно остаться развёрнутым)")
                             exit(0)
                         }
                     }

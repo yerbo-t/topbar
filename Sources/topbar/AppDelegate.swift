@@ -39,8 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--debug-feedback") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.telemetry.askFeedback() }
         }
-        // Точное определение терминала в Ghostty: узнать (и при необходимости спросить) разрешение «Автоматизация».
-        if !CommandLine.arguments.contains("--skip-onboarding") { GhosttyAccess.shared.refresh(ask: true) }
+        // Точное определение вкладки в Ghostty (Terminal и iTerm2 спросим, когда владелец окажется в них с сессией): узнать (и при необходимости спросить) разрешение «Автоматизация».
+        if !CommandLine.arguments.contains("--skip-onboarding") { AutomationAccess.shared.refresh(TerminalScripting.ghostty, ask: true) }
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -53,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let ws = NSWorkspace.shared.notificationCenter
         observers.append(ws.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            if app?.bundleIdentifier == GhosttyScripting.bundleId { GhosttyAccess.shared.refresh(ask: true) }
+            if app?.bundleIdentifier == TerminalScripting.ghostty { AutomationAccess.shared.refresh(TerminalScripting.ghostty, ask: true) }
         })
         observers.append(ws.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.model.releaseCards() }

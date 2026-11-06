@@ -101,26 +101,22 @@ public struct IslandPresenter {
     public var topStatus: SessionStatus? { sessions.map(\.status).min { $0.urgency < $1.urgency } }
 }
 
-/// «Владелец смотрит на сессию»: первая версия — активное приложение совпадает с хостом сессии.
+/// «Владелец смотрит на сессию»: активное приложение совпадает с хостом сессии, а если известен терминал в фокусе — и он.
 public enum WatchPolicy {
-    static let bundleIds: [String: String] = [
-        "Ghostty": "com.mitchellh.ghostty",
-        "VS Code": "com.microsoft.VSCode",
-    ]
+    /// Приложение сессии: сообщённое хостом, а для сессий без него — по прежнему имени.
+    public static func hostBundleId(of session: Session) -> String? {
+        session.hostBundleId ?? TerminalHost.bundleId(forName: session.hostApp)
+    }
 
-    /// Владелец смотрит на сессию: активно приложение-хост; для Ghostty, если известен терминал сессии и удалось узнать
-    /// терминал в фокусе (`ghosttyFocusedTTY`, например `/dev/ttys004`), они должны совпасть. Не удалось узнать — по приложению.
-    public static func isWatching(_ session: Session, frontmostBundleId: String?, ghosttyFocusedTTY: String? = nil) -> Bool {
-        guard let host = session.hostApp, let expected = bundleIds[host], let front = frontmostBundleId, front == expected else {
-            return false
-        }
-        if host == "Ghostty", let tty = session.tty, let focused = ghosttyFocusedTTY {
-            return focused == "/dev/" + tty
-        }
+    /// Владелец смотрит на сессию: активно приложение-хост; если известен терминал сессии и удалось узнать терминал в фокусе
+    /// (`focusedTTY`, например `/dev/ttys004`), они должны совпасть. Не удалось узнать — по приложению.
+    public static func isWatching(_ session: Session, frontmostBundleId: String?, focusedTTY: String? = nil) -> Bool {
+        guard let expected = hostBundleId(of: session), let front = frontmostBundleId, front == expected else { return false }
+        if let tty = session.tty, let focused = focusedTTY { return focused == "/dev/" + tty }
         return true
     }
 
-    public static func bundleId(forHost host: String?) -> String? { host.flatMap { bundleIds[$0] } }
+    public static func bundleId(forHost host: String?) -> String? { TerminalHost.bundleId(forName: host) }
 }
 
 /// Чтение и запись settings.json Claude Code: симлинк и права файла сохраняются.

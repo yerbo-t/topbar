@@ -51,6 +51,8 @@ public struct Session: Equatable, Sendable {
     public var pid: Int32
     public var processStartedAt: Double?
     public var hostApp: String?
+    /// Приложение-хост по идентификатору (его выводим вперёд); у незнакомых терминалов `hostApp` пуст, а это поле есть.
+    public var hostBundleId: String? = nil
     public var tty: String?
     public var hints: [String: String]
     public var permissionMode: String?
@@ -66,7 +68,7 @@ public struct Session: Equatable, Sendable {
     public func sameForDisplay(as other: Session) -> Bool {
         sessionId == other.sessionId && project == other.project && projectRoot == other.projectRoot
             && branch == other.branch && status == other.status && currentAction == other.currentAction
-            && hostApp == other.hostApp && tty == other.tty && permissionMode == other.permissionMode
+            && hostApp == other.hostApp && hostBundleId == other.hostBundleId && tty == other.tty && permissionMode == other.permissionMode
             && unseenDone == other.unseenDone
             && queue.map(\.requestId) == other.queue.map(\.requestId)
     }

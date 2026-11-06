@@ -1,0 +1,136 @@
+import AppKit
+import TopbarCore
+
+/// Разрешение «Автоматизация» на управление терминалом, по приложениям. Спрашиваем и проверяем не на главном потоке: окно
+/// запроса системы иначе заморозило бы остров до ответа владельца. Пока доступа нет, всё работает по приложению, а не по
+/// вкладке терминала.
+final class AutomationAccess: @unchecked Sendable {
+    static let shared = AutomationAccess()
+    private let lock = NSLock()
+    private var granted: Set<String> = []
+    private var asked: Set<String> = []
+    private var lastCheck: [String: Date] = [:]
+
+    func isGranted(_ bundleId: String) -> Bool { lock.lock(); defer { lock.unlock() }; return granted.contains(bundleId) }
+
+    /// Узнать состояние разрешения; `ask` — показать системный запрос (один раз за запуск на приложение). Частые вызовы
+    /// (проверка «смотрит ли владелец» идёт на каждое событие) схлопываются: не чаще раза в две секунды.
+    func refresh(_ bundleId: String, ask: Bool) {
+        lock.lock()
+        let now = Date()
+        if let last = lastCheck[bundleId], now.timeIntervalSince(last) < 2 { lock.unlock(); return }
+        lastCheck[bundleId] = now
+        let shouldAsk = ask && asked.insert(bundleId).inserted
+        lock.unlock()
+        DispatchQueue.global(qos: .utility).async { [self] in
+            guard !NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty else { return }
+            let target = NSAppleEventDescriptor(bundleIdentifier: bundleId)
+            let status = AEDeterminePermissionToAutomateTarget(target.aeDesc, typeWildCard, typeWildCard, shouldAsk)
+            lock.lock()
+            if status == noErr { granted.insert(bundleId) } else { granted.remove(bundleId) }
+            lock.unlock()
+        }
+    }
+}
+
+/// Управление терминалами через их AppleScript-словарь: какая вкладка в фокусе и как перенести владельца к вкладке сессии.
+/// Умеют Ghostty, Terminal и iTerm2; у остальных приложение просто выходит вперёд. Нужен доступ «Автоматизация» (система
+/// спросит один раз на приложение). Терминал не запускаем: если он закрыт, не делаем ничего.
+@MainActor
+enum TerminalScripting {
+    struct Driver {
+        let name: String
+        /// Строка AppleScript: tty вкладки в фокусе.
+        let focusedScript: String
+        /// Строка AppleScript: выбрать вкладку с этим tty (`/dev/ttys004`) и вернуть "ok", если нашли.
+        let focusScript: (_ device: String) -> String
+    }
+
+    static let ghostty = "com.mitchellh.ghostty"
+
+    static let drivers: [String: Driver] = [
+        ghostty: Driver(
+            name: "Ghostty",
+            focusedScript: "tell application \"Ghostty\" to get tty of focused terminal of selected tab of front window",
+            focusScript: { device in """
+                tell application "Ghostty"
+                    set matches to (every terminal whose tty is "\(device)")
+                    if (count of matches) > 0 then
+                        focus (item 1 of matches)
+                        return "ok"
+                    end if
+                    return "none"
+                end tell
+                """ }),
+        "com.apple.Terminal": Driver(
+            name: "Terminal",
+            focusedScript: "tell application id \"com.apple.Terminal\" to get tty of selected tab of front window",
+            focusScript: { device in """
+                tell application id "com.apple.Terminal"
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            if tty of t is "\(device)" then
+                                if miniaturized of w then set miniaturized of w to false
+                                set selected tab of w to t
+                                set index of w to 1
+                                return "ok"
+                            end if
+                        end repeat
+                    end repeat
+                    return "none"
+                end tell
+                """ }),
+        "com.googlecode.iterm2": Driver(
+            name: "iTerm2",
+            focusedScript: "tell application id \"com.googlecode.iterm2\" to get tty of current session of current tab of current window",
+            focusScript: { device in """
+                tell application id "com.googlecode.iterm2"
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            repeat with s in sessions of t
+                                if tty of s is "\(device)" then
+                                    select w
+                                    select t
+                                    select s
+                                    return "ok"
+                                end if
+                            end repeat
+                        end repeat
+                    end repeat
+                    return "none"
+                end tell
+                """ }),
+    ]
+
+    private static var cachedTTY: [String: (value: String?, at: Date)] = [:]
+    private static var compiled: [String: NSAppleScript] = [:]
+
+    static func supports(_ bundleId: String?) -> Bool { bundleId.map { drivers[$0] != nil } ?? false }
+
+    static func isRunning(_ bundleId: String) -> Bool {
+        !NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty
+    }
+
+    /// Вкладка в фокусе (`/dev/ttys004`); ответ кэшируется на полсекунды, чтобы не гонять AppleScript на каждое событие.
+    static func focusedTTY(bundleId: String) -> String? {
+        guard let driver = drivers[bundleId], isRunning(bundleId), AutomationAccess.shared.isGranted(bundleId) else { return nil }
+        if let cached = cachedTTY[bundleId], Date().timeIntervalSince(cached.at) < 0.5 { return cached.value }
+        let script = compiled[bundleId] ?? NSAppleScript(source: driver.focusedScript)
+        compiled[bundleId] = script
+        var error: NSDictionary?
+        let value = script?.executeAndReturnError(&error).stringValue
+        cachedTTY[bundleId] = (error == nil ? value : nil, Date())
+        return cachedTTY[bundleId]?.value
+    }
+
+    /// Перенести во вкладку с этим tty (`ttys004`): вкладка выбирается, окно выходит вперёд. false — не нашли или нет доступа.
+    @discardableResult
+    static func focus(bundleId: String, tty: String) -> Bool {
+        guard let driver = drivers[bundleId], isRunning(bundleId), AutomationAccess.shared.isGranted(bundleId) else { return false }
+        let device = "/dev/" + tty.filter { $0.isLetter || $0.isNumber }
+        var error: NSDictionary?
+        let result = NSAppleScript(source: driver.focusScript(device))?.executeAndReturnError(&error).stringValue
+        cachedTTY[bundleId] = nil
+        return error == nil && result == "ok"
+    }
+}

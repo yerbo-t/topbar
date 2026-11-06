@@ -16,7 +16,7 @@
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSAppleEventsUsageDescription</key><string>topbar узнаёт, какой терминал Ghostty в фокусе, и переносит вас к нужной сессии.</string>
+    <key>NSAppleEventsUsageDescription</key><string>topbar узнаёт, какая вкладка терминала (Ghostty, Terminal, iTerm2) в фокусе, и переносит вас к нужной сессии.</string>
     <key>NSHumanReadableCopyright</key><string>topbar</string>
     <!-- Обновления (Sparkle): раз в 6 часов проверка и уведомление, без автоустановки. Подпись — EdDSA; ключ и адрес ленты подставляет scripts/build-app.sh. -->
     <key>SUEnableAutomaticChecks</key><true/>

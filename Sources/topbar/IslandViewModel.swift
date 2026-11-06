@@ -166,11 +166,17 @@ final class IslandViewModel: ObservableObject {
         return NSRunningApplication(processIdentifier: pid_t(pid))?.localizedName
     }
 
-    /// Владелец смотрит на сессию: приложение-хост активно, а для Ghostty — ещё и терминал сессии в фокусе.
+    /// Владелец смотрит на сессию: приложение-хост активно, а для терминалов с точным определением (Ghostty, Terminal, iTerm2) —
+    /// ещё и вкладка сессии в фокусе.
     func isWatching(_ session: Session) -> Bool {
         let front = system.frontmostBundleId
-        let focused = (front == GhosttyScripting.bundleId && session.tty != nil) ? GhosttyScripting.focusedTTY() : nil
-        return WatchPolicy.isWatching(session, frontmostBundleId: front, ghosttyFocusedTTY: focused)
+        var focused: String?
+        if let front, WatchPolicy.hostBundleId(of: session) == front, TerminalScripting.supports(front) {
+            // Первый раз, когда владелец в терминале с сессией, спросим «Автоматизацию»: тогда узнаем и вкладку.
+            if !AutomationAccess.shared.isGranted(front) { AutomationAccess.shared.refresh(front, ask: true) }
+            if session.tty != nil { focused = TerminalScripting.focusedTTY(bundleId: front) }
+        }
+        return WatchPolicy.isWatching(session, frontmostBundleId: front, focusedTTY: focused)
     }
 
     var mode: IslandMode { presenter.mode }

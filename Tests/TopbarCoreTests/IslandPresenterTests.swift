@@ -156,19 +156,19 @@ final class IslandPresenterTests: XCTestCase {
         XCTAssertGreaterThan(e.leftWidth, 36)
     }
 
-    func testGhosttyWatchPolicyComparesTerminalWhenKnown() {
+    func testWatchPolicyComparesTerminalWhenKnown() {
         var s = session("a", .working, host: "Ghostty")
         s.tty = "ttys004"
         let ghostty = "com.mitchellh.ghostty"
-        XCTAssertTrue(WatchPolicy.isWatching(s, frontmostBundleId: ghostty, ghosttyFocusedTTY: "/dev/ttys004"))
-        XCTAssertFalse(WatchPolicy.isWatching(s, frontmostBundleId: ghostty, ghosttyFocusedTTY: "/dev/ttys001"),
+        XCTAssertTrue(WatchPolicy.isWatching(s, frontmostBundleId: ghostty, focusedTTY: "/dev/ttys004"))
+        XCTAssertFalse(WatchPolicy.isWatching(s, frontmostBundleId: ghostty, focusedTTY: "/dev/ttys001"),
                        "Ghostty активен, но в фокусе другая вкладка: на эту сессию не смотрят")
-        XCTAssertTrue(WatchPolicy.isWatching(s, frontmostBundleId: ghostty, ghosttyFocusedTTY: nil),
+        XCTAssertTrue(WatchPolicy.isWatching(s, frontmostBundleId: ghostty, focusedTTY: nil),
                       "не удалось узнать фокус — решаем по приложению")
         s.tty = nil
-        XCTAssertTrue(WatchPolicy.isWatching(s, frontmostBundleId: ghostty, ghosttyFocusedTTY: "/dev/ttys001"),
+        XCTAssertTrue(WatchPolicy.isWatching(s, frontmostBundleId: ghostty, focusedTTY: "/dev/ttys001"),
                       "терминал сессии неизвестен — решаем по приложению")
-        XCTAssertFalse(WatchPolicy.isWatching(s, frontmostBundleId: "com.apple.Safari", ghosttyFocusedTTY: "/dev/ttys004"))
+        XCTAssertFalse(WatchPolicy.isWatching(s, frontmostBundleId: "com.apple.Safari", focusedTTY: "/dev/ttys004"))
     }
 
     func testSameForDisplayIgnoresInvisibleFields() {
@@ -203,5 +203,23 @@ final class IslandPresenterTests: XCTestCase {
         XCTAssertEqual(String(decoding: SettingsFile.read(link.path) ?? Data(), as: UTF8.self), #"{"a":1}"#)
         let mode = try FileManager.default.attributesOfItem(atPath: target.path)[.posixPermissions] as? Int
         XCTAssertEqual(mode, 0o600)
+    }
+
+    func testWatchPolicyUsesHostBundleIdForAnyTerminal() {
+        var s = session("t", .working, host: "Terminal")
+        s.hostBundleId = "com.apple.Terminal"
+        s.tty = "ttys002"
+        XCTAssertTrue(WatchPolicy.isWatching(s, frontmostBundleId: "com.apple.Terminal"), "терминал без точного определения — по приложению")
+        XCTAssertFalse(WatchPolicy.isWatching(s, frontmostBundleId: "com.mitchellh.ghostty"))
+        XCTAssertTrue(WatchPolicy.isWatching(s, frontmostBundleId: "com.apple.Terminal", focusedTTY: "/dev/ttys002"))
+        XCTAssertFalse(WatchPolicy.isWatching(s, frontmostBundleId: "com.apple.Terminal", focusedTTY: "/dev/ttys009"),
+                       "другая вкладка того же терминала")
+    }
+
+    func testWatchPolicyWorksForUnknownHostWithOnlyBundleId() {
+        var s = session("u", .working, host: nil)
+        s.hostBundleId = "com.example.NewTerminal"
+        XCTAssertTrue(WatchPolicy.isWatching(s, frontmostBundleId: "com.example.NewTerminal"))
+        XCTAssertFalse(WatchPolicy.isWatching(s, frontmostBundleId: "com.apple.Terminal"))
     }
 }

@@ -2,8 +2,9 @@ import AppKit
 import ServiceManagement
 import TopbarCore
 
-/// Значок приложения в строке меню: вход в управление. Левый клик открывает список значков с кнопкой «Спрятать значки»
-/// (прячется всё левее значка topbar), меню приложения открывается правым кликом (или клик с Control).
+/// Значок приложения в строке меню: вход в управление. Левый клик прячет значки (всё левее знака topbar) и возвращает их
+/// обратно, правый клик (или клик с Control) открывает настройку значков: закрепить, скрыть, нажать; меню приложения — кнопка
+/// «Меню» внизу этой панели.
 @MainActor
 final class MenuController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
@@ -39,6 +40,7 @@ final class MenuController: NSObject, NSMenuDelegate {
             button.imagePosition = .imageOnly
         }
         list.model.onNothingToHide = { [weak self] in self?.list.hide(); self?.showNothingToHide() }
+        list.model.onShowMenu = { [weak self] in self?.showAppMenu() }
         hider.onStateChange = { [weak self] in self?.updateIcon(); self?.list.model.objectWillChange.send() }
         hider.onSafetyRevert = { [weak self] in self?.showSafetyAlert() }
         if Settings.hidesMenuBarIcons { hider.enable(control: statusItem); list.model.hider = hider }
@@ -60,34 +62,42 @@ final class MenuController: NSObject, NSMenuDelegate {
     private func updateIcon() {
         guard let button = statusItem.button else { return }
         button.image = ControlIcon.image(filled: !hider.isEnabled || hider.isCollapsed)
-        var tip = "Левый клик — список значков, правый — меню topbar"
-        if hider.isEnabled { tip = (hider.isCollapsed ? "Значки спрятаны. " : "Значки показаны. ") + tip }
+        var tip = hider.isEnabled
+            ? (hider.isCollapsed ? "Значки спрятаны. Клик — показать, правый клик — настройка значков и меню" : "Значки показаны. Клик — спрятать, правый клик — настройка значков и меню")
+            : "Клик — список значков, правый клик — настройка значков и меню"
         if let version = updater?.availableVersion { tip = "Доступна версия \(version). " + tip }
         button.toolTip = tip
     }
 
     @objc private func statusClicked() {
         let event = NSApp.currentEvent
+        guard let frame = iconFrame else { return }
         if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
-            list.hide()
-            guard let frame = iconFrame else { return }
-            menu.popUp(positioning: nil, at: NSPoint(x: frame.minX, y: frame.minY), in: nil)
+            list.toggle(anchoredTo: frame)          // настройка значков; меню приложения — кнопка «Меню» в панели
             return
         }
-        guard let frame = iconFrame else { return }
-        list.toggle(anchoredTo: frame)
+        // Левый клик: прятать и возвращать значки. Если сворачивание выключено, показываем список — больше нечего делать.
+        list.hide()
+        guard hider.isEnabled else { list.show(anchoredTo: frame); return }
+        if hider.toggle() == .nothingToHide { showNothingToHide() }
+        updateIcon()
+    }
+
+    /// Меню приложения (хуки, обновления, автозапуск, выход) — из кнопки «Меню» в панели настройки значков.
+    private func showAppMenu() {
+        list.hide()
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 
     private func showSetupHint() {
         let alert = NSAlert()
         alert.messageText = "Как работает сворачивание значков"
         alert.informativeText = """
-            Левый клик по знаку topbar открывает список значков. Кнопка «Спрятать значки» в нём прячет всё, что стоит левее знака \
-            topbar; повторное нажатие возвращает значки. Спрятанное закрывается само через \(Int(MenuBarHider.autoCollapseDelay)) с после показа.
+            Клик по знаку topbar прячет всё, что стоит левее знака; ещё один клик возвращает значки. Сами по себе они не прячутся.
 
             Чтобы часть значков осталась на виду, зажмите ⌘ и перетащите знак topbar левее них. Чтобы прятать больше, перетащите его правее.
 
-            Меню приложения — правый клик по знаку.
+            Правый клик по знаку открывает настройку значков (закрепить, скрыть) и меню приложения.
             """
         alert.addButton(withTitle: "Понятно")
         NSApp.activate(ignoringOtherApps: true)
@@ -113,7 +123,7 @@ final class MenuController: NSObject, NSMenuDelegate {
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        GhosttyAccess.shared.refresh(ask: false)
+        for id in TerminalScripting.drivers.keys { AutomationAccess.shared.refresh(id, ask: false) }
         menu.removeAllItems()
         if let version = updater?.availableVersion {
             menu.addItem(item("Обновить до \(version)…", #selector(checkForUpdates)))
@@ -124,11 +134,15 @@ final class MenuController: NSObject, NSMenuDelegate {
         menu.addItem(status)
         menu.addItem(item("Установить хуки…", #selector(installHooks)))
         menu.addItem(item("Удалить хуки…", #selector(removeHooks)))
-        let ghostty = NSMenuItem(title: GhosttyAccess.shared.isGranted
-            ? "Ghostty: точный терминал определяется"
-            : "Ghostty: определяю по приложению (нет доступа «Автоматизация»)", action: nil, keyEquivalent: "")
-        ghostty.isEnabled = false
-        menu.addItem(ghostty)
+        // Строка на каждый терминал с точным определением вкладки: Ghostty всегда, остальные — пока запущены.
+        for (id, driver) in TerminalScripting.drivers.sorted(by: { $0.value.name < $1.value.name })
+        where id == TerminalScripting.ghostty || TerminalScripting.isRunning(id) {
+            let line = NSMenuItem(title: AutomationAccess.shared.isGranted(id)
+                ? "\(driver.name): точная вкладка определяется"
+                : "\(driver.name): определяю по приложению (нет доступа «Автоматизация»)", action: nil, keyEquivalent: "")
+            line.isEnabled = false
+            menu.addItem(line)
+        }
         menu.addItem(.separator())
         let hiding = item("Сворачивать значки меню", #selector(toggleHiding))
         hiding.state = hider.isEnabled ? .on : .off

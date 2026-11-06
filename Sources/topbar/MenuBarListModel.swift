@@ -14,6 +14,8 @@ final class MenuBarListModel: ObservableObject {
     /// Сворачивание значков (кнопка в подвале списка); nil — выключено.
     var hider: MenuBarHider?
     var onNothingToHide: (() -> Void)?
+    /// Показать меню приложения (кнопка «Меню» в подвале).
+    var onShowMenu: (() -> Void)?
     var onClose: (() -> Void)?
     /// Есть новая версия приложения (nil — нет) и что сделать по кнопке «Обновить».
     @Published var updateVersion: String?
