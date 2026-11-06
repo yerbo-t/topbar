@@ -23,6 +23,7 @@ final class MenuBarListController {
         host.sizingOptions = []
         panel.contentView = host
         model.onClose = { [weak self] in self?.hide() }
+        model.onResize = { [weak self] in self?.layout() }
     }
 
     var isShown: Bool { panel.isVisible }
@@ -81,7 +82,7 @@ final class MenuBarListController {
         } else if model.entries.isEmpty {
             height += 80
         } else {
-            height += MenuBarListView.listHeight(rows: model.entries.count)
+            height += MenuBarListView.listHeight(content: model.contentHeight)
         }
         if model.message != nil { height += 44 }
         if model.updateVersion != nil { height += 52 }       // кнопка «Обновить до …»

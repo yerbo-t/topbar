@@ -1,13 +1,17 @@
 import AppKit
 import TopbarCore
 
-/// Данные списка значков строки меню: что нашлось, что закреплено сверху, что нажато.
+/// Данные списка значков строки меню: что нашлось, что закреплено, скрыто глазом, кто недавно был в работе, что нажато.
 @MainActor
 final class MenuBarListModel: ObservableObject {
     @Published private(set) var entries: [MenuBarEntry] = []
     @Published private(set) var trusted = MenuBarItemsProvider.isTrusted
     @Published private(set) var loading = false
-    @Published private(set) var pinned: [String]
+    @Published private(set) var prefs: MenuBarPrefs
+    /// Группа «Скрытые» развёрнута.
+    @Published private(set) var hiddenExpanded = false
+    /// Высота списка поменялась (группа раскрылась или свернулась, значок переехал): панель подгоняет размер.
+    var onResize: (() -> Void)?
     /// Короткое сообщение под списком (почему значок не нажался и что делать).
     @Published var message: String?
     private(set) var icons: [String: NSImage] = [:]
@@ -22,13 +26,41 @@ final class MenuBarListModel: ObservableObject {
     var onUpdate: (() -> Void)?
 
     private static let pinnedKey = "menuBarPinned"
+    private static let hiddenKey = "menuBarEyeHidden"
+    private static let usedKey = "menuBarLastUsed"
+    private var activationObserver: NSObjectProtocol?
 
     init() {
-        pinned = UserDefaults.standard.stringArray(forKey: Self.pinnedKey) ?? []
+        let defaults = UserDefaults.standard
+        prefs = MenuBarPrefs(pinned: defaults.stringArray(forKey: Self.pinnedKey) ?? [],
+                             hidden: defaults.stringArray(forKey: Self.hiddenKey) ?? [],
+                             lastUsed: defaults.dictionary(forKey: Self.usedKey) as? [String: Double] ?? [:])
+        // Кто последним был в работе: приложение стало активным.
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            MainActor.assumeIsolated {
+                guard let id = app?.bundleIdentifier, id != Bundle.main.bundleIdentifier else { return }
+                self?.markUsed(id)
+            }
+        }
     }
 
-    var ordered: [MenuBarEntry] { MenuBarOrdering.order(entries, pinned: pinned) }
-    var hiddenCount: Int { entries.filter { $0.visibility != .visible }.count }
+    var sections: MenuBarSections { MenuBarOrdering.sections(entries, prefs: prefs) }
+    /// В строке меню этих значков сейчас не видно (под вырезом или спрятаны кнопкой сворачивания).
+    var notVisibleCount: Int { entries.filter { $0.visibility != .visible }.count }
+
+    /// Высота нарисованного списка (для высоты панели): строки значков, строка «Скрытые» и разделитель закреплённых.
+    var contentHeight: CGFloat {
+        let s = sections
+        var height = CGFloat(s.pinned.count + s.recent.count) * MenuBarListView.rowHeight
+        if !s.pinned.isEmpty, !s.recent.isEmpty { height += MenuBarListView.dividerHeight }
+        if !s.hidden.isEmpty {
+            height += MenuBarListView.groupHeaderHeight
+            if hiddenExpanded { height += CGFloat(s.hidden.count) * MenuBarListView.rowHeight }
+        }
+        return height
+    }
 
     func refresh() {
         trusted = MenuBarItemsProvider.isTrusted
@@ -74,21 +106,40 @@ final class MenuBarListModel: ObservableObject {
         if now { refresh() }
     }
 
-    func isPinned(_ entry: MenuBarEntry) -> Bool { pinned.contains(entry.id) }
+    func isPinned(_ entry: MenuBarEntry) -> Bool { prefs.isPinned(entry.id) }
+    func isHidden(_ entry: MenuBarEntry) -> Bool { prefs.isHidden(entry.id) }
 
-    func togglePin(_ entry: MenuBarEntry) {
-        pinned = isPinned(entry) ? MenuBarOrdering.unpin(entry.id, from: pinned) : MenuBarOrdering.pin(entry.id, in: pinned)
-        UserDefaults.standard.set(pinned, forKey: Self.pinnedKey)
+    func togglePin(_ entry: MenuBarEntry) { change { $0.togglePin(entry.id) } }
+    func moveToTop(_ entry: MenuBarEntry) { change { $0.moveToTop(entry.id) } }
+    func toggleHidden(_ entry: MenuBarEntry) { change { $0.toggleHidden(entry.id) } }
+
+    func toggleHiddenGroup() {
+        hiddenExpanded.toggle()
+        onResize?()
     }
 
-    func moveToTop(_ entry: MenuBarEntry) {
-        pinned = MenuBarOrdering.pin(entry.id, in: pinned, atTop: true)
-        UserDefaults.standard.set(pinned, forKey: Self.pinnedKey)
+    private func change(_ edit: (inout MenuBarPrefs) -> Void) {
+        edit(&prefs)
+        save()
+        onResize?()
+    }
+
+    private func markUsed(_ key: String) {
+        prefs.markUsed(key, at: Date())
+        save()
+    }
+
+    private func save() {
+        let defaults = UserDefaults.standard
+        defaults.set(prefs.pinned, forKey: Self.pinnedKey)
+        defaults.set(prefs.hidden, forKey: Self.hiddenKey)
+        defaults.set(prefs.lastUsed, forKey: Self.usedKey)
     }
 
     /// Нажать значок. Спрятанный кнопкой сворачивания — сначала показать значки; не помещённый системой — объяснить.
     func press(_ entry: MenuBarEntry) {
         message = nil
+        markUsed(entry.id)
         if entry.visibility == .pushedOff, let hider, hider.isCollapsed { hider.setCollapsed(false) }
         let delay: TimeInterval = entry.visibility == .pushedOff ? 0.6 : 0
         let id = entry.id, visibility = entry.visibility

@@ -2,11 +2,13 @@ import AppKit
 import SwiftUI
 import TopbarCore
 
-/// Список всех значков строки меню: закреплённые владельцем сверху, остальные ниже.
+/// Список всех значков строки меню: закреплённые сверху, ниже остальные по недавности работы, внизу свёрнутая группа «Скрытые».
 struct MenuBarListView: View {
     @ObservedObject var model: MenuBarListModel
     static let width: CGFloat = 340
     static let rowHeight: CGFloat = 46
+    static let groupHeaderHeight: CGFloat = 36
+    static let dividerHeight: CGFloat = 9
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,14 +37,12 @@ struct MenuBarListView: View {
                     .frame(maxWidth: .infinity, minHeight: 80)
             } else {
                 ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(model.ordered) { entry in
-                            MenuBarRow(model: model, entry: entry)
-                        }
-                    }
-                    .padding(.horizontal, 6)
+                    sectionsView
+                        .padding(.horizontal, 6)
+                        .animation(Self.rowAnimation, value: model.prefs)
+                        .animation(Self.rowAnimation, value: model.hiddenExpanded)
                 }
-                .frame(height: Self.listHeight(rows: model.entries.count))
+                .frame(height: Self.listHeight(content: model.contentHeight))
             }
             footer
         }
@@ -55,14 +55,49 @@ struct MenuBarListView: View {
         )
     }
 
-    static func listHeight(rows: Int) -> CGFloat { min(CGFloat(max(rows, 1)) * rowHeight + 8, 400) }
+    static func listHeight(content: CGFloat) -> CGFloat { min(max(content, rowHeight) + 8, 400) }
+
+    static var rowAnimation: Animation? {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.86)
+    }
+
+    @ViewBuilder private var sectionsView: some View {
+        let sections = model.sections
+        VStack(spacing: 0) {
+            ForEach(sections.pinned) { MenuBarRow(model: model, entry: $0) }
+            if !sections.pinned.isEmpty, !sections.recent.isEmpty {
+                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                    .padding(.horizontal, 12).padding(.vertical, (Self.dividerHeight - 1) / 2)
+            }
+            ForEach(sections.recent) { MenuBarRow(model: model, entry: $0) }
+            if !sections.hidden.isEmpty {
+                Button { model.toggleHiddenGroup() } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold))
+                            .rotationEffect(.degrees(model.hiddenExpanded ? 90 : 0))
+                        Text("Скрытые (\(sections.hidden.count))").font(.system(size: 12, weight: .medium))
+                        Spacer()
+                    }
+                    .foregroundStyle(Color(white: 0.62))
+                    .padding(.horizontal, 12)
+                    .frame(height: Self.groupHeaderHeight)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(model.hiddenExpanded ? "Свернёт группу скрытых значков" : "Покажет скрытые значки, чтобы вернуть нужные")
+                if model.hiddenExpanded {
+                    ForEach(sections.hidden) { MenuBarRow(model: model, entry: $0) }
+                }
+            }
+        }
+    }
 
     private var header: some View {
         HStack {
             Text("Значки строки меню").font(.system(size: 13, weight: .semibold))
             Spacer()
             if model.trusted, !model.entries.isEmpty {
-                Text("\(model.entries.count)" + (model.hiddenCount > 0 ? " · не видно \(model.hiddenCount)" : ""))
+                Text("\(model.entries.count)" + (model.notVisibleCount > 0 ? " · в строке не видно \(model.notVisibleCount)" : ""))
                     .font(.system(size: 11)).foregroundStyle(Color(white: 0.62))
             }
         }
@@ -132,6 +167,7 @@ struct MenuBarRow: View {
 
     var body: some View {
         let dimmed = entry.visibility != .visible
+        let hidden = model.isHidden(entry)
         HStack(spacing: 10) {
             Group {
                 if let symbol = Self.systemSymbol(for: entry) {
@@ -152,29 +188,37 @@ struct MenuBarRow: View {
                 }
             }
             Spacer(minLength: 6)
-            if entry.visibility != .visible {
-                Text(entry.visibility == .underNotch ? "под вырезом" : "спрятан")
+            if entry.visibility == .underNotch {
+                Text("под вырезом")
                     .font(.system(size: 10.5)).foregroundStyle(Color(red: 1, green: 0.7, blue: 0.25))
             }
             if model.isPinned(entry), hovering {
                 Button { model.moveToTop(entry) } label: { Image(systemName: "arrow.up.to.line") }
                     .buttonStyle(.plain).foregroundStyle(Color(white: 0.7)).help("В самый верх")
             }
+            Button { model.toggleHidden(entry) } label: {
+                Image(systemName: hidden ? "eye.slash" : "eye").frame(width: 20)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color(white: hidden ? 0.85 : (hovering ? 0.7 : 0.35)))
+            .help(hidden ? "Вернуть значок в список" : "Скрыть значок из списка")
+            .accessibilityLabel(hidden ? "Вернуть значок \(entry.title)" : "Скрыть значок \(entry.title)")
             Button { model.togglePin(entry) } label: {
-                Image(systemName: model.isPinned(entry) ? "pin.fill" : "pin")
+                Image(systemName: model.isPinned(entry) ? "pin.fill" : "pin").frame(width: 20)
             }
             .buttonStyle(.plain)
             .foregroundStyle(model.isPinned(entry) ? Color.white : Color(white: hovering ? 0.7 : 0.35))
             .help(model.isPinned(entry) ? "Открепить" : "Закрепить сверху")
+            .accessibilityLabel(model.isPinned(entry) ? "Открепить значок \(entry.title)" : "Закрепить значок \(entry.title) сверху")
         }
         .padding(.horizontal, 12)
         .frame(height: MenuBarListView.rowHeight)
         .background(RoundedRectangle(cornerRadius: 10).fill(hovering ? Color(white: 0.14) : .clear))
-        .opacity(dimmed ? 0.8 : 1)
+        .opacity(hidden ? 0.55 : (dimmed ? 0.8 : 1))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture { model.press(entry) }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
+        .help(entry.visibility == .pushedOff ? "Сейчас спрятан кнопкой сворачивания значков" : "")
+        .accessibilityElement(children: .contain)
     }
 }
