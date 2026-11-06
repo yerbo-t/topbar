@@ -42,6 +42,22 @@ public enum ArtworkUpdate: Equatable, Sendable {
     case data(Data)
 }
 
+extension NowPlaying {
+    /// Тот же трек (название, исполнитель, альбом совпадают): пауза и «играть» его не меняют.
+    public func isSameTrack(as other: NowPlaying) -> Bool {
+        title == other.title && artist == other.artist && album == other.album
+    }
+}
+
+extension ArtworkUpdate {
+    /// Приложения при паузе и «играть» на миг публикуют трек без обложки. У того же трека такое «убрать обложку» не применяем,
+    /// иначе обложка пропадает после нажатия «пауза».
+    public func ignoringTransientClear(previous: NowPlaying?, current: NowPlaying) -> ArtworkUpdate {
+        if case .cleared = self, let previous, previous.isSameTrack(as: current) { return .unchanged }
+        return self
+    }
+}
+
 /// Строка потока помощника.
 public enum NowPlayingMessage: Equatable, Sendable {
     case state(NowPlaying, ArtworkUpdate)

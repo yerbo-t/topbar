@@ -28,6 +28,7 @@ static dispatch_queue_t queue;
 static dispatch_source_t timer;
 static NSDictionary *lastState;
 static NSUInteger lastArtworkHash;
+static NSString *lastTrackKey;
 static BOOL emitScheduled;
 static BOOL queryInFlight;
 
@@ -61,33 +62,48 @@ static void put(NSMutableDictionary *dict, NSString *key, id value) {
     if (value) dict[key] = value;
 }
 
-/// Собрать и выдать состояние, если оно изменилось. Обложка уходит только вместе с новой обложкой (она тяжёлая).
+/// Собрать и выдать состояние, если оно изменилось. Обложка уходит только когда она новая (она тяжёлая). Две тонкости:
+/// приложения при паузе/«играть» на миг публикуют информацию без обложки — у того же трека это не «убрать обложку»;
+/// а обложка, пришедшая позже названия (новый трек), должна дойти и тогда, когда остальное состояние не менялось.
 static void emitState(NSDictionary *info, BOOL playing, int pid) {
     NSString *title = [info[@"kMRMediaRemoteNowPlayingInfoTitle"] isKindOfClass:[NSString class]] ? info[@"kMRMediaRemoteNowPlayingInfoTitle"] : nil;
+    NSString *artist = [info[@"kMRMediaRemoteNowPlayingInfoArtist"] isKindOfClass:[NSString class]] ? info[@"kMRMediaRemoteNowPlayingInfoArtist"] : nil;
+    NSString *album = [info[@"kMRMediaRemoteNowPlayingInfoAlbum"] isKindOfClass:[NSString class]] ? info[@"kMRMediaRemoteNowPlayingInfoAlbum"] : nil;
     NSMutableDictionary *state = [NSMutableDictionary new];
+    NSString *trackKey = nil;
     if (title.length == 0) {
         state[@"none"] = @YES;
     } else {
+        trackKey = [NSString stringWithFormat:@"%@|%@|%@", title, artist ?: @"", album ?: @""];
         state[@"playing"] = @(playing);
         state[@"pid"] = @(pid);
         state[@"title"] = title;
-        put(state, @"artist", [info[@"kMRMediaRemoteNowPlayingInfoArtist"] isKindOfClass:[NSString class]] ? info[@"kMRMediaRemoteNowPlayingInfoArtist"] : nil);
-        put(state, @"album", [info[@"kMRMediaRemoteNowPlayingInfoAlbum"] isKindOfClass:[NSString class]] ? info[@"kMRMediaRemoteNowPlayingInfoAlbum"] : nil);
+        put(state, @"artist", artist);
+        put(state, @"album", album);
         put(state, @"duration", number(info[@"kMRMediaRemoteNowPlayingInfoDuration"]));
         put(state, @"elapsed", number(info[@"kMRMediaRemoteNowPlayingInfoElapsedTime"]));
         put(state, @"rate", number(info[@"kMRMediaRemoteNowPlayingInfoPlaybackRate"]));
         NSDate *stamp = [info[@"kMRMediaRemoteNowPlayingInfoTimestamp"] isKindOfClass:[NSDate class]] ? info[@"kMRMediaRemoteNowPlayingInfoTimestamp"] : nil;
         if (stamp) state[@"timestamp"] = @(stamp.timeIntervalSince1970);
     }
-    if ([state isEqualToDictionary:lastState]) return;
-    NSMutableDictionary *line = [state mutableCopy];
     NSData *art = [info[@"kMRMediaRemoteNowPlayingInfoArtworkData"] isKindOfClass:[NSData class]] ? info[@"kMRMediaRemoteNowPlayingInfoArtworkData"] : nil;
     NSUInteger hash = art ? art.hash : 0;
-    if (hash != lastArtworkHash) {
-        line[@"artwork"] = art ? [art base64EncodedStringWithOptions:0] : (id)[NSNull null];
-        lastArtworkHash = hash;
+    BOOL sameTrack = trackKey != nil && [trackKey isEqualToString:lastTrackKey];
+    id artworkField = nil;
+    if (art && hash != lastArtworkHash) {
+        artworkField = [art base64EncodedStringWithOptions:0];
+    } else if (!art && lastArtworkHash != 0 && !sameTrack) {
+        artworkField = [NSNull null];   // трек сменился (или ничего не играет), а обложки нет: прежнюю убираем
+    }
+    BOOL stateChanged = ![state isEqualToDictionary:lastState];
+    if (!stateChanged && !artworkField) return;
+    NSMutableDictionary *line = [state mutableCopy];
+    if (artworkField) {
+        line[@"artwork"] = artworkField;
+        lastArtworkHash = art ? hash : 0;
     }
     lastState = state;
+    lastTrackKey = trackKey;
     printLine(line);
 }
 

@@ -109,7 +109,7 @@ final class IslandViewModel: ObservableObject {
     private func handle(_ message: NowPlayingMessage) {
         switch message {
         case .state(let state, let art):
-            applyArtwork(art)
+            applyArtwork(art.ignoringTransientClear(previous: nowPlaying, current: state))
             let justPaused = (nowPlaying?.playing ?? false) && !state.playing
             nowPlaying = state
             if state.playing { pausedSince = nil } else if justPaused || pausedSince == nil { pausedSince = Date() }
