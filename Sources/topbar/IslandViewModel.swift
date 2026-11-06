@@ -272,7 +272,10 @@ final class IslandViewModel: ObservableObject {
         // Отладка: подставить свободное место (`--debug-free-right 36`, `--debug-free-left 0`), чтобы проверить виды ушей.
         if let value = Self.debugValue("--debug-free-right") { right = .points(value) }
         if let value = Self.debugValue("--debug-free-left") { left = .points(value) }
-        // Сторона, которую не разглядеть (строка спрятана, нет «Универсального доступа»), остаётся при последнем известном месте.
+        // Значков справа не видно — строка меню спрятана (полноэкранное окно): меню слева тоже не видны, хотя «Универсальный
+        // доступ» и сообщает их места. Остаёмся при последнем известном месте с обеих сторон.
+        if case .unknown = right { return false }
+        // Меню слева не разглядеть (нет «Универсального доступа») — левая сторона остаётся при последнем известном месте.
         func value(_ sample: MenuBarLayout.FreeSpace, _ last: CGFloat?) -> CGFloat? {
             switch sample {
             case .unknown: return last
@@ -280,7 +283,6 @@ final class IslandViewModel: ObservableObject {
             case .points(let v): return v
             }
         }
-        if case .unknown = right, case .unknown = left { return false }
         let free = Space(left: value(left, space.left), right: value(right, space.right))
         if free.same(as: space) {
             pendingFree = nil
