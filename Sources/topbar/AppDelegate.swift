@@ -62,19 +62,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.hub.tickNow(); self?.panel.layout() }
         })
 
-        // Первый запуск: спросить согласие на сообщение автору, затем — если хуков ещё нет — предложить поставить.
+        // Первый запуск: спросить согласие на сообщение автору, затем показать окно настройки (оно же объясняет, как пользоваться).
+        // Дальше окно само открывается только пока не стоят хуки: без них остров ничего не видит.
         DispatchQueue.main.async { [weak self] in
             guard let self, !CommandLine.arguments.contains("--skip-onboarding") else { return }
             self.telemetry.askConsentIfNeeded()
             self.telemetry.pingIfNeeded()
-            guard !HooksController().isInstalledAndHealthy() else { return }
-            let alert = NSAlert()
-            alert.messageText = "Подключить Claude Code?"
-            alert.informativeText = "Чтобы остров видел сессии, нужно вписать хуки в настройки Claude Code. Перед записью вы увидите точную разницу."
-            alert.addButton(withTitle: "Показать изменения")
-            alert.addButton(withTitle: "Позже")
-            NSApp.activate(ignoringOtherApps: true)
-            if alert.runModal() == .alertFirstButtonReturn { self.menu.installHooks() }
+            let hooksReady = HooksController().isInstalledAndHealthy()
+            if !Settings.setupGuideShown || !hooksReady {
+                Settings.setupGuideShown = true
+                self.menu.showSetupGuide()
+            }
         }
     }
 

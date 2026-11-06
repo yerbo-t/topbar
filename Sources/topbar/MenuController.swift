@@ -10,6 +10,12 @@ final class MenuController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
     private let hooks = HooksController()
+    private lazy var guide: SetupGuideController = {
+        let guide = SetupGuideController(hooks: hooks)
+        guide.model.onInstallHooks = { [weak self] in self?.hooks.install() }
+        guide.model.onToggleLogin = { [weak self] in self?.toggleLogin() }
+        return guide
+    }()
     private let hider = MenuBarHider()
     private let list = MenuBarListController()
     /// Владелец включил или выключил плеер в меню.
@@ -46,6 +52,9 @@ final class MenuController: NSObject, NSMenuDelegate {
         if Settings.hidesMenuBarIcons { hider.enable(control: statusItem); list.model.hider = hider }
         updateIcon()
         if CommandLine.arguments.contains("--debug-hider-selftest") { hider.selfTest() }
+        if CommandLine.arguments.contains("--debug-open-setup") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.showSetupGuide() }
+        }
         if CommandLine.arguments.contains("--debug-open-icon-list") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self, let frame = self.iconFrame else { return }
@@ -89,19 +98,10 @@ final class MenuController: NSObject, NSMenuDelegate {
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 
-    private func showSetupHint() {
-        let alert = NSAlert()
-        alert.messageText = "Как работает сворачивание значков"
-        alert.informativeText = """
-            Клик по знаку topbar прячет всё, что стоит левее знака; ещё один клик возвращает значки. Сами по себе они не прячутся.
-
-            Чтобы часть значков осталась на виду, зажмите ⌘ и перетащите знак topbar левее них. Чтобы прятать больше, перетащите его правее.
-
-            Правый клик по знаку открывает настройку значков (закрепить, скрыть) и меню приложения.
-            """
-        alert.addButton(withTitle: "Понятно")
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
+    /// Окно «Настройка и подсказки»: что включить, чтобы всё работало, со статусом каждого шага.
+    func showSetupGuide() {
+        list.hide()
+        guide.show()
     }
 
     private func showNothingToHide() {
@@ -129,6 +129,8 @@ final class MenuController: NSObject, NSMenuDelegate {
             menu.addItem(item("Обновить до \(version)…", #selector(checkForUpdates)))
             menu.addItem(.separator())
         }
+        menu.addItem(item("Настройка и подсказки…", #selector(openSetupGuide)))
+        menu.addItem(.separator())
         let status = NSMenuItem(title: "Хуки Claude Code: \(hooks.statusText())", action: nil, keyEquivalent: "")
         status.isEnabled = false
         menu.addItem(status)
@@ -147,7 +149,6 @@ final class MenuController: NSObject, NSMenuDelegate {
         let hiding = item("Сворачивать значки меню", #selector(toggleHiding))
         hiding.state = hider.isEnabled ? .on : .off
         menu.addItem(hiding)
-        if hider.isEnabled { menu.addItem(item("Как настроить сворачивание…", #selector(setupHint))) }
         menu.addItem(.separator())
         let login = item("Запускать при входе", #selector(toggleLogin))
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -189,7 +190,7 @@ final class MenuController: NSObject, NSMenuDelegate {
     @objc func removeHooks() { hooks.remove() }
     @objc func toggleSound() { Settings.soundEnabled.toggle() }
     @objc func togglePlayer() { onPlayerToggle?(!Settings.playerEnabled) }
-    @objc func setupHint() { showSetupHint() }
+    @objc func openSetupGuide() { showSetupGuide() }
     @objc func checkForUpdates() { updater?.checkForUpdates() }
     @objc func toggleShare() { guard let t = telemetry else { return }; t.setEnabled(!t.isEnabled) }
     @objc func changeName() { telemetry?.askName() }
