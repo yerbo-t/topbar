@@ -82,7 +82,7 @@ final class MenuBarListController {
         }
         guard let frame = screen?.frame else { return }
         let width = MenuBarListView.width
-        var height: CGFloat = 40 + 52          // шапка и подвал
+        var height: CGFloat = 40 + 104         // шапка и подвал (подсказка и кнопки)
         if !model.trusted {
             height += 190
         } else if model.entries.isEmpty {

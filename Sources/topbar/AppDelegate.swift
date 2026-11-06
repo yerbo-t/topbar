@@ -46,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.system.refreshScreens()
+                self.model.noteScreenTransition()
                 if !self.system.hasNotchScreen { self.model.releaseCards() }
                 self.panel.layout()
             }
@@ -54,6 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observers.append(ws.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
             if app?.bundleIdentifier == TerminalScripting.ghostty { AutomationAccess.shared.refresh(TerminalScripting.ghostty, ask: true) }
+        })
+        observers.append(ws.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.model.noteScreenTransition() }
         })
         observers.append(ws.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.model.releaseCards() }

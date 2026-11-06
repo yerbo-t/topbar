@@ -53,6 +53,11 @@ final class MenuBarListModel: ObservableObject {
         }
     }
 
+    /// Значок самого topbar или системный: такие в список не попадают.
+    static func isSystemOrOwn(_ bundleId: String) -> Bool {
+        bundleId == Bundle.main.bundleIdentifier || bundleId.hasPrefix("com.apple.")
+    }
+
     var sections: MenuBarSections { MenuBarOrdering.sections(entries, prefs: prefs) }
     /// В строке меню этих значков сейчас не видно (под вырезом или спрятаны кнопкой сворачивания).
     var notVisibleCount: Int { entries.filter { $0.visibility != .visible }.count }
@@ -85,8 +90,9 @@ final class MenuBarListModel: ObservableObject {
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    // Свои значки (знак topbar) в списке ни к чему: ими не управляют отсюда.
-                    self.entries = found.filter { $0.width > 0 && $0.bundleId != Bundle.main.bundleIdentifier }
+                    // В списке только значки обычных приложений. Свои (знак topbar) и системные (часы, батарея, Wi-Fi, «Пункт
+                    // управления», раскладка, пароли Apple) не показываем: прятать их нельзя, а в списке они только путали бы.
+                    self.entries = found.filter { $0.width > 0 && !Self.isSystemOrOwn($0.bundleId) }
                     self.knownApps.formUnion(found.map(\.bundleId))
                     UserDefaults.standard.set(Array(self.knownApps), forKey: Self.knownAppsKey)
                     for entry in found where self.icons[entry.bundleId] == nil {

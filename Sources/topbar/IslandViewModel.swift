@@ -31,6 +31,11 @@ final class IslandViewModel: ObservableObject {
     /// Свободное место между вырезом и первым значком справа (nil — значков нет или не удалось узнать).
     private var availableRight: CGFloat?
     private var spaceCheckedAt = Date.distantPast
+    /// Переход между столами и экранами: пока идёт, значки в строке меню перекладываются и замеру места верить нельзя.
+    private var spaceFrozenUntil = Date.distantPast
+    /// Новое значение свободного места принимается, когда два замера подряд его подтвердили (мигание на переходах отсекается).
+    private var pendingFree: (value: CGFloat?, seen: Int)?
+    private var hasMeasuredSpace = false
     private var pendingSessions: [Session]?
     private var flushTask: Task<Void, Never>?
     /// Список раскрыт кликом (остаётся, пока владелец не свернёт); наведением раскрывается временно.
@@ -234,13 +239,21 @@ final class IslandViewModel: ObservableObject {
         }
     }
 
+    /// Перешли на другой стол или поменялись параметры экрана: ближайшие две секунды замеры места не принимаем.
+    func noteScreenTransition() {
+        spaceFrozenUntil = Date().addingTimeInterval(2)
+        pendingFree = nil
+    }
+
     /// Узнать, сколько места до первого значка справа от выреза. true — место изменилось и остров надо пересобрать.
     /// Значки меняются сами по себе (SwiftBar меняет заголовок, приложения добавляют и убирают значки), поэтому
-    /// пока остров свёрнут, это проверяется раз в пару секунд.
+    /// пока остров свёрнут, это проверяется раз в пару секунд. Чтобы «уши» не дёргались при переходе между столами, новое
+    /// значение принимается только после двух одинаковых замеров подряд и не во время перехода; самый первый замер — сразу.
     @discardableResult
     func refreshMenuBarSpace(force: Bool = false) -> Bool {
         guard let geometry else { return false }
         if !force, Date().timeIntervalSince(spaceCheckedAt) < 0.5 { return false }
+        if Date() < spaceFrozenUntil { return false }
         spaceCheckedAt = Date()
         var sample = MenuBarLayout.freeSpaceRightOfNotch(on: geometry.screen, notchWidth: geometry.notchWidth)
         // Отладка: подставить свободное место (`--debug-free-right 36`), чтобы проверить виды ушей без значков.
@@ -252,14 +265,27 @@ final class IslandViewModel: ObservableObject {
         case .unlimited: free = nil
         case .points(let value): free = value
         }
-        let changed: Bool
-        switch (free, availableRight) {
-        case (nil, nil): changed = false
-        case let (a?, b?): changed = abs(a - b) >= 2
-        default: changed = true
+        func same(_ a: CGFloat?, _ b: CGFloat?) -> Bool {
+            switch (a, b) {
+            case (nil, nil): return true
+            case let (x?, y?): return abs(x - y) < 2
+            default: return false
+            }
         }
-        if changed { availableRight = free; recomputeLayout() }
-        return changed
+        if same(free, availableRight) {
+            pendingFree = nil
+            hasMeasuredSpace = true
+            return false
+        }
+        if hasMeasuredSpace {
+            if let pending = pendingFree, same(pending.value, free) { pendingFree = (free, pending.seen + 1) } else { pendingFree = (free, 1) }
+            guard (pendingFree?.seen ?? 0) >= 2 else { return false }
+        }
+        hasMeasuredSpace = true
+        pendingFree = nil
+        availableRight = free
+        recomputeLayout()
+        return true
     }
 
     /// Сдвиг центра окна от середины экрана: свёрнутый остров может быть несимметричным (справа места мало).

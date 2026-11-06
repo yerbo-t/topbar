@@ -75,7 +75,7 @@ struct MenuBarListView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold))
                             .rotationEffect(.degrees(model.hiddenExpanded ? 90 : 0))
-                        Text("Скрытые (\(sections.hidden.count))").font(.system(size: 12, weight: .medium))
+                        Text("Убраны из списка (\(sections.hidden.count))").font(.system(size: 12, weight: .medium))
                         Spacer()
                     }
                     .foregroundStyle(Color(white: 0.62))
@@ -84,7 +84,7 @@ struct MenuBarListView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityHint(model.hiddenExpanded ? "Свернёт группу скрытых значков" : "Покажет скрытые значки, чтобы вернуть нужные")
+                .accessibilityHint(model.hiddenExpanded ? "Свернёт группу убранных значков" : "Покажет убранные из списка значки, чтобы вернуть нужные")
                 if model.hiddenExpanded {
                     ForEach(sections.hidden) { MenuBarRow(model: model, entry: $0) }
                 }
@@ -125,19 +125,24 @@ struct MenuBarListView: View {
     }
 
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             if let message = model.message {
                 Text(message).font(.system(size: 11)).foregroundStyle(Color(red: 1, green: 0.7, blue: 0.25))
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: 16) {
-                Button("Меню") { model.onShowMenu?() }
+            Text("Глаз убирает значок из этого списка, булавка ставит его выше. В самой строке меню значки так не двигаются: их переставляют ⌘ + перетаскивание.")
+                .font(.system(size: 11)).foregroundStyle(Color(white: 0.5))
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
+                Button { model.onShowMenu?() } label: { Label("Меню", systemImage: "line.3.horizontal") }
+                    .buttonStyle(PillButtonStyle(kind: .neutral, compact: true))
+                    .accessibilityHint("Откроет меню приложения: хуки, обновления, автозапуск, выход")
                 Spacer(minLength: 0)
-                Button("Закрыть") { model.onClose?() }
+                Button { model.onClose?() } label: { Label("Закрыть", systemImage: "xmark") }
+                    .buttonStyle(PillButtonStyle(kind: .neutral, compact: true))
             }
-            .buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Color(white: 0.66))
         }
-        .padding(.horizontal, 18).padding(.vertical, 10)
+        .padding(.horizontal, 18).padding(.top, 8).padding(.bottom, 14)
     }
 }
 
@@ -194,21 +199,21 @@ struct MenuBarRow: View {
             }
             if model.isPinned(entry), hovering {
                 Button { model.moveToTop(entry) } label: { Image(systemName: "arrow.up.to.line") }
-                    .buttonStyle(.plain).foregroundStyle(Color(white: 0.7)).help("В самый верх")
+                    .buttonStyle(.plain).foregroundStyle(Color(white: 0.7)).help("Поставить первым среди закреплённых в этом списке")
             }
             Button { model.toggleHidden(entry) } label: {
                 Image(systemName: hidden ? "eye.slash" : "eye").frame(width: 20)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(Color(white: hidden ? 0.85 : (hovering ? 0.7 : 0.35)))
-            .help(hidden ? "Вернуть значок в список" : "Скрыть значок из списка")
+            .foregroundStyle(Color(white: hidden ? 0.85 : (hovering ? 0.8 : 0.5)))
+            .help(hidden ? "Вернуть значок в список" : "Убрать значок из этого списка (в строке меню он останется)")
             .accessibilityLabel(hidden ? "Вернуть значок \(entry.title)" : "Скрыть значок \(entry.title)")
             Button { model.togglePin(entry) } label: {
                 Image(systemName: model.isPinned(entry) ? "pin.fill" : "pin").frame(width: 20)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(model.isPinned(entry) ? Color.white : Color(white: hovering ? 0.7 : 0.35))
-            .help(model.isPinned(entry) ? "Открепить" : "Закрепить сверху")
+            .foregroundStyle(model.isPinned(entry) ? Color.white : Color(white: hovering ? 0.8 : 0.5))
+            .help(model.isPinned(entry) ? "Открепить" : "Закрепить: значок будет вверху списка")
             .accessibilityLabel(model.isPinned(entry) ? "Открепить значок \(entry.title)" : "Закрепить значок \(entry.title) сверху")
         }
         .padding(.horizontal, 12)

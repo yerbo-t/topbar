@@ -31,6 +31,8 @@ func sessionTitle(_ title: String, size: CGFloat) -> Text {
 struct PillButtonStyle: ButtonStyle {
     enum Kind { case allow, neutral, light }
     let kind: Kind
+    /// Маленькая кнопка для подвалов и строк (меньше шрифт и отступы).
+    var compact = false
 
     func makeBody(configuration: Configuration) -> some View {
         let pressed = configuration.isPressed
@@ -46,11 +48,11 @@ struct PillButtonStyle: ButtonStyle {
         }
         let line: Color = kind == .neutral ? Look.neutralLine : .clear
         configuration.label
-            .font(.system(size: 13.5, weight: .semibold))
-            .padding(.horizontal, 18).padding(.vertical, 9)
+            .font(.system(size: compact ? 12.5 : 13.5, weight: .semibold))
+            .padding(.horizontal, compact ? 12 : 18).padding(.vertical, compact ? 6 : 9)
             .foregroundStyle(ink)
-            .background(RoundedRectangle(cornerRadius: 12).fill(fill))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(line, lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: compact ? 10 : 12).fill(fill))
+            .overlay(RoundedRectangle(cornerRadius: compact ? 10 : 12).strokeBorder(line, lineWidth: 1))
             .scaleEffect(pressed && !Look.reduceMotion ? 0.93 : 1)
             .animation(.easeOut(duration: 0.18), value: pressed)
     }
