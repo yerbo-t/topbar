@@ -1,0 +1,12 @@
+{
+  "name": "allow commit message mentioning DELETE FROM",
+  "stdin": {
+    "tool_input": {
+      "command": "git commit -m \"fix: guard DELETE FROM without WHERE\""
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_not_contains": [
+    "permissionDecision"
+  ]
+}

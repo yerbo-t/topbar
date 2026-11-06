@@ -1,0 +1,12 @@
+{
+  "name": "ask cd && ./publish.sh",
+  "stdin": {
+    "tool_input": {
+      "command": "cd scripts && ./publish.sh --yes"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_contains": [
+    "\"ask\""
+  ]
+}

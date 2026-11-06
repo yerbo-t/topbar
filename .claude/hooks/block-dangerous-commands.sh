@@ -78,21 +78,41 @@ if printf '%s' "$CMD_NOQUOTE" | grep -qE 'rm[[:space:]]+(-[a-zA-Z]+[[:space:]]+)
 fi
 
 # ── Dangerous database operations ───────────────────────────────────────
+# Проверяется только то, что может выполнить SQL: части команды, начинающиеся с поиска (grep, rg…) или git
+# (сообщение коммита, git log -S), выбрасываются — иначе `grep -n "DELETE FROM" server/src/store.ts` блокировался бы.
+# Разделители (; & | перевод строки) сохраняются, чтобы ниже инструкции разбирались так же, как в исходной команде.
+# Регистр снимается через tr: awk на macOS не знает IGNORECASE, и строчный `delete from` проходил бы мимо.
+SQL_TEXT=$(printf '%s' "$COMMAND" | awk '
+  BEGIN { RS = "\001" }
+  {
+    rest = $0; out = ""
+    while (length(rest) > 0) {
+      if (match(rest, /[;&|\n]/)) { seg = substr(rest, 1, RSTART - 1); sep = substr(rest, RSTART, 1); rest = substr(rest, RSTART + 1) }
+      else { seg = rest; sep = ""; rest = "" }
+      head = seg
+      sub(/^[[:space:](]*/, "", head)
+      while (head ~ /^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+/) sub(/^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+/, "", head)
+      if (head ~ /^(grep|egrep|fgrep|rg|ag|ack|git)([[:space:]]|$)/) seg = ""
+      out = out seg sep
+    }
+    printf "%s", out
+  }
+' | tr '[:upper:]' '[:lower:]')
 # DROP TABLE|DATABASE|SCHEMA
-if contains_icmd 'DROP[[:space:]]+(TABLE|DATABASE|SCHEMA)[[:space:]]+'; then
+if printf '%s' "$SQL_TEXT" | grep -qE 'drop[[:space:]]+(table|database|schema)[[:space:]]+'; then
   emit_deny "Blocked: DROP TABLE/DATABASE/SCHEMA detected. Run manually if intended."
 fi
 # DELETE FROM without a WHERE on the SAME statement.
 # Split on ';' so multi-statement inputs are analysed per-statement.
-if printf '%s\n' "$COMMAND" | awk '
-  BEGIN { IGNORECASE=1; RS=";" }
-  /DELETE[[:space:]]+FROM[[:space:]]+[A-Za-z_][A-Za-z0-9_.]*/ {
-    if ($0 !~ /WHERE/) { print "BAD"; exit }
+if printf '%s\n' "$SQL_TEXT" | awk '
+  BEGIN { RS=";" }
+  /delete[[:space:]]+from[[:space:]]+[a-z_][a-z0-9_.]*/ {
+    if ($0 !~ /where/) { print "BAD"; exit }
   }
 ' | grep -q BAD; then
   emit_deny "Blocked: DELETE FROM without a WHERE clause. Add a WHERE or run manually."
 fi
-if contains_icmd 'TRUNCATE[[:space:]]+TABLE'; then
+if printf '%s' "$SQL_TEXT" | grep -qE 'truncate[[:space:]]+table'; then
   emit_deny "Blocked: TRUNCATE TABLE detected. Run manually if intended."
 fi
 

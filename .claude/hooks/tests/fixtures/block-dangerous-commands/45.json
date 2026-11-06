@@ -1,0 +1,12 @@
+{
+  "name": "allow release.sh with env",
+  "stdin": {
+    "tool_input": {
+      "command": "TOPBAR_ALLOW_HTTP=1 scripts/release.sh"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_not_contains": [
+    "permissionDecision"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "ask env-prefixed publish",
+  "stdin": {
+    "tool_input": {
+      "command": "TOPBAR_VERSION=0.2.3 scripts/publish.sh --yes"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_contains": [
+    "\"ask\""
+  ]
+}

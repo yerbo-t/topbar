@@ -1,0 +1,12 @@
+{
+  "name": "block SQL piped into sqlite3",
+  "stdin": {
+    "tool_input": {
+      "command": "echo \"DELETE FROM installs\" | sqlite3 data/installs.sqlite"
+    }
+  },
+  "expect_exit": 2,
+  "expect_stdout_contains": [
+    "deny"
+  ]
+}

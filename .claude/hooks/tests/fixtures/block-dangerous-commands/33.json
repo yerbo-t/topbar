@@ -1,0 +1,12 @@
+{
+  "name": "allow swift test",
+  "stdin": {
+    "tool_input": {
+      "command": "swift test --filter BranchReaderTests"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_not_contains": [
+    "ask"
+  ]
+}

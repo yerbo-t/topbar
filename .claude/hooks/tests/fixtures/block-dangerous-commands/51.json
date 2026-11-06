@@ -1,0 +1,12 @@
+{
+  "name": "allow swift release build",
+  "stdin": {
+    "tool_input": {
+      "command": "swift build -c release --product topbar"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_not_contains": [
+    "permissionDecision"
+  ]
+}

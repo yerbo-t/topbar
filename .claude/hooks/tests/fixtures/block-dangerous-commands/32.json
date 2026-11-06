@@ -1,0 +1,12 @@
+{
+  "name": "deny beats ask in compound",
+  "stdin": {
+    "tool_input": {
+      "command": "git push origin feat/next && git reset --hard"
+    }
+  },
+  "expect_exit": 2,
+  "expect_stdout_contains": [
+    "deny"
+  ]
+}

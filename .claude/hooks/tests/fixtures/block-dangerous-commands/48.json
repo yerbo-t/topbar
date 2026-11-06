@@ -1,0 +1,12 @@
+{
+  "name": "allow quarantine removal and open",
+  "stdin": {
+    "tool_input": {
+      "command": "xattr -dr com.apple.quarantine /Applications/topbar.app && open /Applications/topbar.app"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_not_contains": [
+    "permissionDecision"
+  ]
+}

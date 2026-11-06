@@ -1,0 +1,12 @@
+{
+  "name": "allow grep publish.sh",
+  "stdin": {
+    "tool_input": {
+      "command": "grep -n gh scripts/publish.sh"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_not_contains": [
+    "ask"
+  ]
+}

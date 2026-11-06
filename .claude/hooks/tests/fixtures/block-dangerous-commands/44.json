@@ -1,0 +1,12 @@
+{
+  "name": "allow build-app --install",
+  "stdin": {
+    "tool_input": {
+      "command": "scripts/build-app.sh --install"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_not_contains": [
+    "permissionDecision"
+  ]
+}

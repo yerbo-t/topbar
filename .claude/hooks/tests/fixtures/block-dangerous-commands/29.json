@@ -1,0 +1,12 @@
+{
+  "name": "ask gh release create",
+  "stdin": {
+    "tool_input": {
+      "command": "gh release create v0.2.4 a.zip"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_contains": [
+    "\"ask\""
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "block delete via node -e",
+  "stdin": {
+    "tool_input": {
+      "command": "node -e \"db.exec('DELETE FROM installs')\""
+    }
+  },
+  "expect_exit": 2,
+  "expect_stdout_contains": [
+    "deny"
+  ]
+}

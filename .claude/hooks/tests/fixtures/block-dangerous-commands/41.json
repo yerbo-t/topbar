@@ -1,0 +1,12 @@
+{
+  "name": "allow multi-line delete with where",
+  "stdin": {
+    "tool_input": {
+      "command": "sqlite3 x.db \"DELETE FROM installs\nWHERE id = 1\""
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_not_contains": [
+    "permissionDecision"
+  ]
+}

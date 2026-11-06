@@ -1,0 +1,12 @@
+{
+  "name": "allow server tests",
+  "stdin": {
+    "tool_input": {
+      "command": "cd server && npm test"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_not_contains": [
+    "permissionDecision"
+  ]
+}

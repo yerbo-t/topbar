@@ -1,0 +1,12 @@
+{
+  "name": "allow cat publish.sh",
+  "stdin": {
+    "tool_input": {
+      "command": "cat scripts/publish.sh"
+    }
+  },
+  "expect_exit": 0,
+  "expect_stdout_not_contains": [
+    "ask"
+  ]
+}
