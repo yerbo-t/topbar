@@ -254,7 +254,7 @@ struct RowView: View {
 
     /// Статус словами; когда сессия ждёт ответа на вопрос Claude, а не разрешения, так и сказано.
     private var statusWord: String {
-        if session.status == .waitingPermission, session.queue.first?.toolName == "AskUserQuestion" { return "ждёт ответа" }
+        if session.status == .waitingPermission, session.queue.first?.toolName == PermissionPolicy.questionTool { return "ждёт ответа" }
         return session.status.label
     }
 

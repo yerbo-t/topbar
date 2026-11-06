@@ -119,7 +119,7 @@ public struct SessionStore {
             let match = s.running.last {
                 $0.toolName == name && $0.fingerprint == fingerprint && !($0.toolUseId.map(linked.contains) ?? false)
             }
-            let questions = name == "AskUserQuestion" ? AskQuestions.parse(ev.toolInput) : nil
+            let questions = name == PermissionPolicy.questionTool ? AskQuestions.parse(ev.toolInput) : nil
             let request = PermissionRequest(
                 requestId: msg.requestId,
                 sessionId: ev.sessionId,

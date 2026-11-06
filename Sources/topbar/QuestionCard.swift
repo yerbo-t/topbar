@@ -75,9 +75,9 @@ extension CardView {
             }
             Spacer().frame(height: CardMetrics.beforeActions)
             ViewThatFits(in: .horizontal) {
-                questionActions(card.session, question: question, index: index, chosen: chosen,
+                questionActions(card.session, question: question, index: index, count: questions.count, chosen: chosen,
                                 open: card.session.hostApp.map { "Открыть в \($0)" } ?? "Открыть сессию")
-                questionActions(card.session, question: question, index: index, chosen: chosen, open: "Открыть")
+                questionActions(card.session, question: question, index: index, count: questions.count, chosen: chosen, open: "Открыть")
             }
             .frame(height: CardMetrics.actions)
         }
@@ -86,8 +86,8 @@ extension CardView {
         .riseIn(0)
     }
 
-    private func questionActions(_ session: Session, question: AskQuestion, index: Int, chosen: [String], open: String) -> some View {
-        let last = index == model.ask.questionCount - 1
+    private func questionActions(_ session: Session, question: AskQuestion, index: Int, count: Int, chosen: [String], open: String) -> some View {
+        let last = index == count - 1
         return HStack(spacing: 0) {
             HStack(spacing: 6) {
                 if index > 0 {

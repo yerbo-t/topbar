@@ -41,6 +41,8 @@ public enum AskQuestions {
             guard Set(options.map(\.label)).count == options.count else { return nil }
             var multi = false
             if case .bool(let flag)? = item["multiSelect"] { multi = flag }
+            // Несколько ответов склеиваются через «, »: подпись с запятой сделала бы ответ двусмысленным.
+            if multi, options.contains(where: { $0.label.contains(",") }) { return nil }
             let header = item["header"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
             result.append(AskQuestion(question: text, header: header, multiSelect: multi, options: options))
         }

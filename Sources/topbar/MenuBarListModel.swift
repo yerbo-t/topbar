@@ -21,8 +21,6 @@ final class MenuBarListModel: ObservableObject {
     /// Показать меню приложения (кнопка «Меню» в подвале).
     var onShowMenu: (() -> Void)?
     var onClose: (() -> Void)?
-    /// Значок нажат успешно (нажимали из ряда закреплённых на острове — остров сворачивается).
-    var onPressed: (() -> Void)?
     private var refreshedAt = Date.distantPast
     /// Есть новая версия приложения (nil — нет) и что сделать по кнопке «Обновить».
     @Published var updateVersion: String?
@@ -81,12 +79,11 @@ final class MenuBarListModel: ObservableObject {
 
     /// Для острова: значки подгружаются, когда раскрывается список, но не чаще раза в три секунды (наведение раскрывает его часто).
     func refreshIfStale() {
-        guard Date().timeIntervalSince(refreshedAt) > 3 else { return }
+        guard !loading, Date().timeIntervalSince(refreshedAt) > 3 else { return }
         refresh()
     }
 
     func refresh() {
-        refreshedAt = Date()
         for (key, seconds) in pendingUsed { prefs.markUsed(key, at: Date(timeIntervalSince1970: seconds)) }
         pendingUsed = [:]
         trusted = MenuBarItemsProvider.isTrusted
@@ -111,6 +108,7 @@ final class MenuBarListModel: ObservableObject {
                         self.icons[entry.bundleId] = NSRunningApplication.runningApplications(withBundleIdentifier: entry.bundleId).first?.icon
                     }
                     self.loading = false
+                    self.refreshedAt = Date()   // три секунды — от прихода результата, а не от начала запроса
                 }
             }
         }
@@ -167,7 +165,7 @@ final class MenuBarListModel: ObservableObject {
     }
 
     /// Нажать значок. Спрятанный кнопкой сворачивания — сначала показать значки; не помещённый системой — объяснить.
-    func press(_ entry: MenuBarEntry) {
+    func press(_ entry: MenuBarEntry, onSuccess: (() -> Void)? = nil) {
         message = nil
         markUsed(entry.id)
         if entry.visibility == .pushedOff, let hider, hider.isCollapsed { hider.setCollapsed(false) }
@@ -179,7 +177,7 @@ final class MenuBarListModel: ObservableObject {
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         guard let self else { return }
-                        if ok { self.onClose?(); self.onPressed?(); return }
+                        if ok { self.onClose?(); onSuccess?(); return }
                         self.message = switch visibility {
                         case .underNotch: "Система сейчас не показывает этот значок: правее выреза не хватает места. Освободите место — закройте приложение или спрячьте значки."
                         case .pushedOff: "Значок остаётся за краем экрана. Разверните значки кнопкой внизу списка."

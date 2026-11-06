@@ -50,8 +50,14 @@ final class AskQuestionTests: XCTestCase {
             ("повтор варианта", Self.input([Self.question(options: [Self.option("А"), Self.option("А")])])),
             ("пустая подпись", Self.input([Self.question(options: [Self.option(" "), Self.option("Б")])])),
             ("пустой вопрос", Self.input([Self.question("  ")])),
+            ("запятая в подписи при множественном выборе", Self.input([Self.question(multi: true, options: [Self.option("Redis, Memcached"), Self.option("Postgres")])])),
         ]
         for (name, input) in cases { XCTAssertNil(AskQuestions.parse(input), name) }
+    }
+
+    func testCommaInLabelIsFineWhenOnlyOneAnswerIsPossible() {
+        let options = [Self.option("Да, конечно"), Self.option("Нет")]
+        XCTAssertNotNil(AskQuestions.parse(Self.input([Self.question(multi: false, options: options)])))
     }
 
     func testNullPreviewIsTreatedAsAbsent() {

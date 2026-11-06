@@ -101,7 +101,9 @@ public struct Summary: Equatable, Sendable {
 /// Какие инструменты остров не превращает в карточку «разрешить/отклонить»: для них эти кнопки бессмысленны.
 /// У `AskUserQuestion` своя карточка с вариантами ответа (когда вопрос остров умеет показать, см. `AskQuestions`).
 public enum PermissionPolicy {
-    public static let passthroughTools: Set<String> = ["AskUserQuestion", "ExitPlanMode"]
+    /// Инструмент, которым Claude Code задаёт вопрос с вариантами.
+    public static let questionTool = "AskUserQuestion"
+    public static let passthroughTools: Set<String> = [questionTool, "ExitPlanMode"]
 
     public static func intercepts(toolName: String?) -> Bool {
         guard let toolName else { return true }
@@ -120,7 +122,7 @@ public enum ActionDescriber {
             let path = input?["file_path"]?.stringValue ?? input?["notebook_path"]?.stringValue ?? ""
             let name = (path as NSString).lastPathComponent
             return name.isEmpty ? toolName : "\(toolName) \(name)"
-        case "AskUserQuestion":
+        case PermissionPolicy.questionTool:
             return "Задаёт вопрос"
         case "ExitPlanMode":
             return "Ждёт решения по плану"

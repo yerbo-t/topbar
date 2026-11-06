@@ -51,7 +51,8 @@ final class IslandViewModel: ObservableObject {
         var requestId: String?
         var index = 0
         var picks: [String: [String]] = [:]
-        var questionCount = 0
+        /// Ответ уже отправлен хабу: повторные нажатия, пока карточка не закрылась, игнорируются.
+        var sending = false
     }
     private(set) var ask = AskDraft()
 
@@ -62,7 +63,6 @@ final class IslandViewModel: ObservableObject {
                 // Изменение приходит до того, как значения обновились: пересчёт — на следующем обороте.
                 DispatchQueue.main.async { MainActor.assumeIsolated { self?.iconsChanged() } }
             }
-            icons?.onPressed = { [weak self] in self?.collapse() }
         }
     }
     private var iconsObserver: AnyCancellable?
@@ -430,18 +430,19 @@ final class IslandViewModel: ObservableObject {
 
     var pinnedRowCount: Int { icons?.pinnedRow.count ?? 0 }
 
-    /// Значки или закреплённое поменялись: ряд мог появиться, исчезнуть или сменить состав.
+    /// Значки или закреплённое поменялись. Содержимое ряда и подпись внизу обновляют сами (они следят за значками); остров
+    /// пересобирается, только если ряд появился, исчез или сменил высоту.
     private func iconsChanged() {
-        guard presenter.mode == .list else { lastPinnedRowCount = pinnedRowCount; return }
         let count = pinnedRowCount
+        defer { lastPinnedRowCount = count }
+        guard presenter.mode == .list, (count > 0) != (lastPinnedRowCount > 0) else { return }
         recomputeLayout()
         withAnimation(Look.reduceMotion ? nil : .easeOut(duration: 0.15)) { objectWillChange.send() }
-        if count != lastPinnedRowCount { onLayoutChange?() }
-        lastPinnedRowCount = count
+        onLayoutChange?()
     }
 
     /// Нажать закреплённый значок (спрятанный сворачиванием — после возврата значков).
-    func pressPinned(_ entry: MenuBarEntry) { icons?.press(entry) }
+    func pressPinned(_ entry: MenuBarEntry) { icons?.press(entry) { [weak self] in self?.collapse() } }
 
     // MARK: ответ на вопрос Claude
 
@@ -449,7 +450,7 @@ final class IslandViewModel: ObservableObject {
 
     /// Нажат вариант. Вопрос с одним ответом: ответ принят, дальше следующий вопрос или отправка. С несколькими: отметка.
     func askPick(_ label: String) {
-        guard let questions = currentQuestions, ask.index < questions.count else { return }
+        guard !ask.sending, let questions = currentQuestions, ask.index < questions.count else { return }
         let question = questions[ask.index]
         guard question.options.contains(where: { $0.label == label }) else { return }
         if question.multiSelect {
@@ -465,13 +466,13 @@ final class IslandViewModel: ObservableObject {
 
     /// «Далее» / «Готово» у вопроса с несколькими ответами.
     func askNext() {
-        guard let questions = currentQuestions, ask.index < questions.count,
+        guard !ask.sending, let questions = currentQuestions, ask.index < questions.count,
               !(ask.picks[questions[ask.index].question] ?? []).isEmpty else { return }
         askAdvance()
     }
 
     func askBack() {
-        guard ask.index > 0 else { return }
+        guard !ask.sending, ask.index > 0 else { return }
         ask.index -= 1
         askChanged(resize: true)
     }
@@ -489,8 +490,18 @@ final class IslandViewModel: ObservableObject {
     private func submitAsk() {
         guard let card = presenter.currentCard else { return }
         let id = card.request.requestId
-        hub.answer(requestId: id, picks: ask.picks) { [weak self] _ in
-            MainActor.assumeIsolated { self?.apply { $0.requestClosed(id) } }
+        ask.sending = true
+        hub.answer(requestId: id, picks: ask.picks) { [weak self] delivered in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if delivered {
+                    self.apply { $0.requestClosed(id) }
+                } else {
+                    // Не доставлено: запрос уже закрыт (карточку снимет само закрытие) или выбор не подошёл — начинаем вопросы заново.
+                    self.ask = AskDraft(requestId: self.ask.requestId)
+                    self.askChanged(resize: true)
+                }
+            }
         }
     }
 
@@ -518,7 +529,7 @@ final class IslandViewModel: ObservableObject {
             icons.refreshIfStale()
         }
         if ask.requestId != next.currentCardId {
-            ask = AskDraft(requestId: next.currentCardId, questionCount: next.currentCard?.request.questions?.count ?? 0)
+            ask = AskDraft(requestId: next.currentCardId)
         }
         recomputeLayout()
         if CommandLine.arguments.contains("--debug") {
