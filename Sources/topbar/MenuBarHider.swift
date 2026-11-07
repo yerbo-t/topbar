@@ -72,7 +72,7 @@ final class MenuBarHider {
         for delay in [0.8, 10.0] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self, self.isEnabled, !self.isCollapsed, (self.itemsToHide() ?? 0) > 0 else { return }
-                self.collapseAligned()
+                self.collapse()
             }
         }
     }
@@ -97,19 +97,20 @@ final class MenuBarHider {
         }
         // nil — строка меню сейчас спрятана (полноэкранное окно), значков не разглядеть: считаем, что прятать есть что.
         if let count = itemsToHide(), count == 0 { return .nothingToHide }
-        collapseAligned()
+        collapse()
         return .changed
     }
 
-    /// Свернуть, предварительно поставив выталкиватель впритык к знаку: иначе спрячется только часть значков или ни одного.
-    /// В развёрнутом виде выталкивателя в строке нет, поэтому на время проверки он показывается узким.
-    private func collapseAligned() {
-        // Новый значок система ставит на сохранённое место надёжнее, чем сдвигает старый, поэтому выталкиватель создаётся заново.
+    /// Свернуть: выталкиватель создаётся заново и сразу длинным. Новый значок система ставит на сохранённое место надёжнее, чем
+    /// сдвигает старый; а промежуточное «узкий и видимый» нельзя: пока он доезжает до знака, значки на глаз сдвигаются на его
+    /// ширину и переставляются, и только потом пропадают. Что он встал впритык к знаку, проверяется уже после.
+    private func collapse() {
         recreatePusher()
-        settlePusher(allowRebuild: true) { [weak self] ok in
-            guard let self, self.isEnabled, !self.isCollapsed else { return }
-            if !ok { Self.trace("выталкиватель не встал впритык к знаку за 3 с, сворачиваю как есть (сторож поправит)") }
-            self.setCollapsed(true)
+        setCollapsed(true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            guard let self, self.isEnabled, self.isCollapsed, let gap = self.gapBetweenPusherAndControl(), abs(gap) > 4 else { return }
+            Self.trace("выталкиватель встал не у знака (зазор \(gap)), переставляю")
+            self.rebuildPusher()
         }
     }
 
@@ -119,14 +120,16 @@ final class MenuBarHider {
         repairedStrayCount = 0
         Self.trace(collapsed ? "значки свёрнуты" : "значки показаны")
         UserDefaults.standard.set(collapsed, forKey: Self.collapsedKey)
-        applyLength()
         if collapsed {
+            applyLength()
             // Если знак оказался левее выталкивателя, он уехал за экран вместе со всем остальным — вернём всё.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
                 guard let self, self.isCollapsed, !self.controlIsOnScreen() else { return }
                 self.setCollapsed(false)
                 self.onSafetyRevert?()
             }
+        } else {
+            releasePusher()
         }
         onStateChange?()
     }
@@ -139,7 +142,7 @@ final class MenuBarHider {
 
     /// Пересоздать выталкиватель сразу левее знака. Свёрнуто — дождаться, пока он встанет впритык (спрятанные значки на это
     /// время на долю секунды показываются), и вернуть длинным; развёрнуто — просто убрать из строки: место ему нужно только при сворачивании,
-    /// и `collapseAligned` создаёт его заново.
+    /// и `collapse` создаёт его заново.
     private func rebuildPusher() {
         recreatePusher()
         guard isCollapsed else { applyLength(); return }
@@ -327,6 +330,18 @@ final class MenuBarHider {
     }
 
     // MARK: внутреннее
+
+    /// Вернуть значки: выталкиватель сначала сужается — значки возвращаются сразу, — и лишь затем уходит из строки. Убрать его
+    /// из строки в тот же миг нельзя: система тогда полсекунды ничего не показывает и только потом возвращает значки (клик
+    /// «замирает»). Убранный следом, он даёт плавный сдвиг значков на его ширину — системная анимация, не скачок.
+    private func releasePusher() {
+        guard let pusher else { return }
+        pusher.length = 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self, weak pusher] in
+            guard let self, !self.isCollapsed, let pusher, pusher === self.pusher else { return }
+            self.applyLength()
+        }
+    }
 
     /// Свёрнуто: выталкиватель в строке и очень длинный. Развёрнуто: убран из строки совсем, иначе его отступы оставляли бы
     /// заметный пробел слева от знака.
