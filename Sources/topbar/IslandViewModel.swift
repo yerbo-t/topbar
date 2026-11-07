@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import os
 import SwiftUI
 import TopbarCore
 
@@ -53,7 +54,11 @@ final class IslandViewModel: ObservableObject {
         var picks: [String: [String]] = [:]
         /// Ответ уже отправлен хабу: повторные нажатия, пока карточка не закрылась, игнорируются.
         var sending = false
+        /// Что пошло не так при отправке ответа (показывается на карточке, пока владелец не нажмёт что-то ещё).
+        var notice: String?
     }
+    /// Журнал вопросов (без текстов вопросов и ответов): `log show --predicate 'subsystem == "dev.topbar.app"'`.
+    private static let askLog = Logger(subsystem: "dev.topbar.app", category: "ask")
     private(set) var ask = AskDraft()
 
     /// Значки строки меню: из них собирается ряд закреплённых над списком сессий (nil — не подключено).
@@ -66,7 +71,7 @@ final class IslandViewModel: ObservableObject {
         }
     }
     private var iconsObserver: AnyCancellable?
-    private var lastPinnedRowCount = 0
+    private var lastPinnedRowHeight: CGFloat = 0
 
     let hub: SessionHub
     let system: SystemState
@@ -348,7 +353,7 @@ final class IslandViewModel: ObservableObject {
         case .list:
             let rows = CGFloat(presenter.sessions.count)
             let player = presenter.mediaActive ? PlayerView.height : 0
-            let pinned = pinnedRowCount > 0 ? PinnedRowView.height : 0
+            let pinned = PinnedRowMetrics.height(icons?.pinnedRow ?? [])
             return CGSize(width: Self.listWidth, height: notchH + 10 + player + pinned + rows * 54 + 44)
         case .card:
             guard let card = presenter.currentCard else { return .zero }
@@ -358,7 +363,7 @@ final class IslandViewModel: ObservableObject {
             let header = m.titleLine + (hasContext ? m.contextLine : 0)
             if let questions = card.request.questions {
                 let index = min(ask.index, questions.count - 1)
-                let body = QuestionMetrics.bodyHeight(questions[index], index: index, count: questions.count)
+                let body = QuestionMetrics.bodyHeight(questions[index], index: index, count: questions.count, notice: ask.notice != nil)
                 return CGSize(width: m.width, height: ceil(notchH + m.top + header + m.afterHeader + body + m.beforeActions + m.actions + m.bottom))
             }
             let question = CGFloat(m.lines(card.request.question, font: m.questionFont, limit: 2)) * m.questionLine
@@ -433,11 +438,11 @@ final class IslandViewModel: ObservableObject {
     var pinnedRowCount: Int { icons?.pinnedRow.count ?? 0 }
 
     /// Значки или закреплённое поменялись. Содержимое ряда и подпись внизу обновляют сами (они следят за значками); остров
-    /// пересобирается, только если ряд появился, исчез или сменил высоту.
+    /// пересобирается, только если ряд сменил высоту (появился, исчез, перешёл на вторую строку).
     private func iconsChanged() {
-        let count = pinnedRowCount
-        defer { lastPinnedRowCount = count }
-        guard presenter.mode == .list, (count > 0) != (lastPinnedRowCount > 0) else { return }
+        let height = PinnedRowMetrics.height(icons?.pinnedRow ?? [])
+        defer { lastPinnedRowHeight = height }
+        guard presenter.mode == .list, height != lastPinnedRowHeight else { return }
         recomputeLayout()
         withAnimation(Look.reduceMotion ? nil : .easeOut(duration: 0.15)) { objectWillChange.send() }
         onLayoutChange?()
@@ -452,9 +457,14 @@ final class IslandViewModel: ObservableObject {
 
     /// Нажат вариант. Вопрос с одним ответом: ответ принят, дальше следующий вопрос или отправка. С несколькими: отметка.
     func askPick(_ label: String) {
-        guard !ask.sending, let questions = currentQuestions, ask.index < questions.count else { return }
+        guard !ask.sending, let questions = currentQuestions, ask.index < questions.count else {
+            Self.askLog.notice("ask: нажатие проигнорировано (отправка идёт или вопросов нет)")
+            return
+        }
         let question = questions[ask.index]
         guard question.options.contains(where: { $0.label == label }) else { return }
+        ask.notice = nil
+        Self.askLog.notice("ask: вариант нажат, вопрос \(self.ask.index + 1, privacy: .public) из \(questions.count, privacy: .public), несколько ответов: \(question.multiSelect, privacy: .public)")
         if question.multiSelect {
             var chosen = ask.picks[question.question] ?? []
             if let i = chosen.firstIndex(of: label) { chosen.remove(at: i) } else { chosen.append(label) }
@@ -470,6 +480,7 @@ final class IslandViewModel: ObservableObject {
     func askNext() {
         guard !ask.sending, let questions = currentQuestions, ask.index < questions.count,
               !(ask.picks[questions[ask.index].question] ?? []).isEmpty else { return }
+        ask.notice = nil
         askAdvance()
     }
 
@@ -493,14 +504,17 @@ final class IslandViewModel: ObservableObject {
         guard let card = presenter.currentCard else { return }
         let id = card.request.requestId
         ask.sending = true
+        Self.askLog.notice("ask: ответ отправлен хабу")
         hub.answer(requestId: id, picks: ask.picks) { [weak self] delivered in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                Self.askLog.notice("ask: ответ доставлен мосту: \(delivered, privacy: .public)")
                 if delivered {
                     self.apply { $0.requestClosed(id) }
                 } else {
-                    // Не доставлено: запрос уже закрыт (карточку снимет само закрытие) или выбор не подошёл — начинаем вопросы заново.
-                    self.ask = AskDraft(requestId: self.ask.requestId)
+                    // Не доставлено: запрос уже закрыт (карточку снимет само закрытие) или выбор не подошёл. Говорим об этом на карточке
+                    // и начинаем вопросы заново: молчаливое «ничего не произошло» хуже любой надписи.
+                    self.ask = AskDraft(requestId: self.ask.requestId, notice: "Не удалось передать ответ Claude. Ответьте в терминале.")
                     self.askChanged(resize: true)
                 }
             }

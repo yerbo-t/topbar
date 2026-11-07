@@ -130,7 +130,7 @@ struct MenuBarListView: View {
                 Text(message).font(.system(size: 11)).foregroundStyle(Color(red: 1, green: 0.7, blue: 0.25))
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("Глаз убирает значок из этого списка, булавка ставит его выше. В самой строке меню значки так не двигаются: их переставляют ⌘ + перетаскивание.")
+            Text("Булавка закрепляет значок: он встаёт вверху этого списка и в ряд «Закреплённые значки» на острове, над сессиями. Глаз убирает значок из этого списка. В самой строке меню значки так не двигаются: их переставляют ⌘ + перетаскивание.")
                 .font(.system(size: 11)).foregroundStyle(Color(white: 0.5))
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 10) {
@@ -213,8 +213,8 @@ struct MenuBarRow: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(model.isPinned(entry) ? Color.white : Color(white: hovering ? 0.8 : 0.5))
-            .help(model.isPinned(entry) ? "Открепить" : "Закрепить: значок будет вверху списка")
-            .accessibilityLabel(model.isPinned(entry) ? "Открепить значок \(entry.title)" : "Закрепить значок \(entry.title) сверху")
+            .help(model.isPinned(entry) ? "Открепить: значок уйдёт и с острова" : "Закрепить: значок встанет вверху списка и в ряд на острове")
+            .accessibilityLabel(model.isPinned(entry) ? "Открепить значок \(entry.title)" : "Закрепить значок \(entry.title) вверху списка и на острове")
         }
         .padding(.horizontal, 12)
         .frame(height: MenuBarListView.rowHeight)
