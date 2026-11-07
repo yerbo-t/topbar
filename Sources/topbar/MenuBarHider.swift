@@ -67,11 +67,13 @@ final class MenuBarHider {
         startWatchdog()
         onStateChange?()
         // Если в прошлый раз значки были спрятаны — прячем и сейчас, когда система разложила значки. Строка меню может быть
-        // спрятана (полный экран) — тогда повторяем позже. Сами по себе значки больше не прячутся: только по клику владельца.
+        // спрятана (полный экран) — тогда повторяем позже. Сами по себе значки больше не прячутся: только по клику владельца,
+        // поэтому повтор смотрит на сохранённое состояние заново: развернул владелец до повтора — повтора нет.
         guard UserDefaults.standard.bool(forKey: Self.collapsedKey) else { return }
         for delay in [0.8, 10.0] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self, self.isEnabled, !self.isCollapsed, (self.itemsToHide() ?? 0) > 0 else { return }
+                guard let self, self.isEnabled, !self.isCollapsed, UserDefaults.standard.bool(forKey: Self.collapsedKey),
+                      (self.itemsToHide() ?? 0) > 0 else { return }
                 self.collapse()
             }
         }
@@ -336,7 +338,7 @@ final class MenuBarHider {
         pusher.length = 1
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self, weak pusher] in
             guard let self, !self.isCollapsed, let pusher, pusher === self.pusher else { return }
-            self.applyLength()
+            pusher.isVisible = false
         }
     }
 
