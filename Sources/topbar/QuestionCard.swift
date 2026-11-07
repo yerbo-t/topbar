@@ -34,11 +34,15 @@ enum QuestionMetrics {
     }
 
     /// Высота всего, что между шапкой и кнопками внизу: метка, вопрос, варианты.
-    static func bodyHeight(_ question: AskQuestion, index: Int, count: Int) -> CGFloat {
+    static let noticeLine: CGFloat = 15
+    static let noticeGap: CGFloat = 8
+
+    static func bodyHeight(_ question: AskQuestion, index: Int, count: Int, notice: Bool = false) -> CGFloat {
         let tag = tag(question, index: index, count: count).isEmpty ? 0 : tagLine
         let text = CGFloat(lines(question.question, font: CardMetrics.questionFont, width: CardMetrics.inner, limit: 3)) * CardMetrics.questionLine
         let options = question.options.map { optionHeight($0, multi: question.multiSelect) }
-        return tag + text + beforeOptions + options.reduce(0, +) + optionGap * CGFloat(max(0, options.count - 1))
+        let noticeHeight = notice ? noticeGap + noticeLine : 0
+        return tag + text + beforeOptions + options.reduce(0, +) + optionGap * CGFloat(max(0, options.count - 1)) + noticeHeight
     }
 }
 
@@ -72,6 +76,12 @@ extension CardView {
                         model.askPick(option.label)
                     }
                 }
+            }
+            if let notice = model.ask.notice {
+                Text(notice)
+                    .font(.system(size: 11.5)).foregroundStyle(Color(red: 1, green: 0.7, blue: 0.25)).lineLimit(1)
+                    .frame(height: QuestionMetrics.noticeLine, alignment: .leading)
+                    .padding(.top, QuestionMetrics.noticeGap)
             }
             Spacer().frame(height: CardMetrics.beforeActions)
             ViewThatFits(in: .horizontal) {

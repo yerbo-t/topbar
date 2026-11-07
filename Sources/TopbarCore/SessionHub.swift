@@ -1,9 +1,11 @@
 import Foundation
+import os
 
 /// Склеивает сокет, автомат статусов и проверку живости.
 /// Внутренняя работа идёт на `queue`; все колбэки уходят на отдельную очередь `callbackQueue`
 /// (интерфейс подставит главную), поэтому из колбэка безопасно вызывать `snapshot()`, `decide()` и т. д.
 public final class SessionHub {
+    private static let log = Logger(subsystem: "dev.topbar.app", category: "hub")
     public let queue = DispatchQueue(label: "topbar.hub")
     public let callbackQueue: DispatchQueue
 
@@ -91,19 +93,21 @@ public final class SessionHub {
     /// запроса; не подошёл — `completion(false)`, карточка остаётся. Остальное — как у `decide`.
     public func answer(requestId: String, picks: [String: [String]], completion: ((Bool) -> Void)? = nil) {
         queue.async { [self] in
-            guard channels[requestId] != nil,
-                  let request = store.sessions.values.lazy.compactMap({ $0.queue.first { $0.requestId == requestId } }).first,
-                  let questions = request.questions,
-                  let answers = AskQuestions.answers(from: picks, for: questions),
-                  let channel = channels.removeValue(forKey: requestId) else {
+            func reject(_ reason: String) {
+                Self.log.notice("ответ на вопрос не принят: \(reason, privacy: .public)")
                 emit { completion?(false) }
-                return
             }
+            guard channels[requestId] != nil else { return reject("мост уже отключился или запрос закрыт") }
+            guard let request = store.sessions.values.lazy.compactMap({ $0.queue.first { $0.requestId == requestId } }).first,
+                  let questions = request.questions else { return reject("запрос не найден или это не вопрос с вариантами") }
+            guard let answers = AskQuestions.answers(from: picks, for: questions) else { return reject("выбор не подходит к вопросам") }
+            guard let channel = channels.removeValue(forKey: requestId) else { return reject("канал пропал") }
             let delivered = channel.send(.answered(answers))
             if delivered {
                 store.resolve(requestId: requestId)
                 notifyChange()
             } else {
+                Self.log.notice("ответ на вопрос не дошёл до моста: сокет закрыт")
                 emit { self.onRequestClosed?(requestId) }
             }
             emit { completion?(delivered) }
