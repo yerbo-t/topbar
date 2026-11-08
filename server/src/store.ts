@@ -31,6 +31,13 @@ export interface Install {
   launches: number;
 }
 
+/** Сколько устройств сейчас на этой версии программы (последняя версия, которую устройство о себе сообщило). */
+export interface VersionCount {
+  version: string;
+  devices: number;
+  last_seen: string;
+}
+
 export interface FeedbackIn {
   id: string;
   name: string | null;
@@ -53,6 +60,23 @@ export interface DownloadRow {
 }
 
 const MAX_DOWNLOAD_ROWS = 20000;
+
+/** Сравнение версий по числам («0.2.10» новее «0.2.9»); не число в части версии сравнивается как текст. Больше нуля — первая новее. */
+export function compareVersions(a: string, b: string): number {
+  const left = a.split(".");
+  const right = b.split(".");
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const x = left[i];
+    const y = right[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    const nx = Number(x);
+    const ny = Number(y);
+    const diff = Number.isNaN(nx) || Number.isNaN(ny) ? x.localeCompare(y) : nx - ny;
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
 
 /**
  * Хранилище на SQLite. IP-адрес и модель Mac сохраняются с согласия человека (окно согласия в приложении и README говорят об
@@ -117,6 +141,14 @@ export class Store {
 
   list(): Install[] {
     return this.db.prepare("SELECT * FROM installs ORDER BY last_seen DESC").all() as unknown as Install[];
+  }
+
+  /** Сводка по версиям: новые выше. */
+  versions(): VersionCount[] {
+    const rows = this.db
+      .prepare("SELECT version, COUNT(*) AS devices, MAX(last_seen) AS last_seen FROM installs GROUP BY version")
+      .all() as unknown as VersionCount[];
+    return rows.sort((a, b) => compareVersions(b.version, a.version));
   }
 
   has(id: string): boolean {
