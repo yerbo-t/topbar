@@ -279,31 +279,34 @@ final class IslandViewModel: ObservableObject {
         }
     }
 
-    /// Перешли на другой стол или поменялись параметры экрана: ближайшие две секунды замеры места не принимаем.
+    /// Перешли на другой стол или поменялись параметры экрана: ближайшие две секунды значки справа не меряем.
     func noteScreenTransition() {
         spaceFrozenUntil = Date().addingTimeInterval(2)
         pendingFree = nil
     }
 
-    /// Узнать, сколько места до первого значка справа от выреза. true — место изменилось и остров надо пересобрать.
-    /// Значки меняются сами по себе (SwiftBar меняет заголовок, приложения добавляют и убирают значки), поэтому
-    /// пока остров свёрнут, это проверяется раз в пару секунд. Чтобы «уши» не дёргались при переходе между столами, новое
-    /// значение принимается только после двух одинаковых замеров подряд и не во время перехода; самый первый замер — сразу.
+    /// Узнать, сколько места по сторонам выреза: слева — до последнего меню приложения, справа — до первого значка. true — место
+    /// изменилось и остров надо пересобрать. Значки меняются сами по себе (SwiftBar меняет заголовок, приложения добавляют и
+    /// убирают значки), поэтому пока остров свёрнут, это проверяется раз в пару секунд. Чтобы «уши» не дёргались при переходе
+    /// между столами, новое значение принимается только после двух одинаковых замеров подряд, а значки справа во время перехода
+    /// не меряются; самый первый замер — сразу. `onlyLeft` — сменилось приложение: у него другие только меню слева.
     @discardableResult
-    func refreshMenuBarSpace(force: Bool = false, immediate: Bool = false) -> Bool {
+    func refreshMenuBarSpace(force: Bool = false, immediate: Bool = false, onlyLeft: Bool = false) -> Bool {
         guard let geometry else { return false }
         if !force, Date().timeIntervalSince(spaceCheckedAt) < 0.5 { return false }
-        if Date() < spaceFrozenUntil { return false }
         spaceCheckedAt = Date()
-        var right = MenuBarLayout.freeSpaceRightOfNotch(on: geometry.screen, notchWidth: geometry.notchWidth)
+        // Во время перехода между столами окна значков то пропадают, то появляются — такому замеру справа верить нельзя.
+        // Меню слева «Универсальный доступ» сообщает верно и в переходе, и когда строка меню спрятана (полноэкранное окно):
+        // строка выезжает при наведении, и меню оказываются ровно на этих местах. Поэтому левую сторону меряем всегда, иначе
+        // уши от прежнего приложения накрывали «Справку» браузера, пока таймер не догонял.
+        let skipsRight = onlyLeft || Date() < spaceFrozenUntil
+        var right: MenuBarLayout.FreeSpace = skipsRight ? .unknown : MenuBarLayout.freeSpaceRightOfNotch(on: geometry.screen, notchWidth: geometry.notchWidth)
         var left = MenuBarLayout.freeSpaceLeftOfNotch(on: geometry.screen, notchWidth: geometry.notchWidth)
         // Отладка: подставить свободное место (`--debug-free-right 36`, `--debug-free-left 0`), чтобы проверить виды ушей.
         if let value = Self.debugValue("--debug-free-right") { right = .points(value) }
         if let value = Self.debugValue("--debug-free-left") { left = .points(value) }
-        // Значков справа не видно — строка меню спрятана (полноэкранное окно): меню слева тоже не видны, хотя «Универсальный
-        // доступ» и сообщает их места. Остаёмся при последнем известном месте с обеих сторон.
-        if case .unknown = right { return false }
-        // Меню слева не разглядеть (нет «Универсального доступа») — левая сторона остаётся при последнем известном месте.
+        // Сторона, которую не разглядеть (значки справа: строка спрятана или идёт переход; меню слева: нет «Универсального
+        // доступа»), остаётся при последнем известном месте.
         func value(_ sample: MenuBarLayout.FreeSpace, _ last: CGFloat?) -> CGFloat? {
             switch sample {
             case .unknown: return last
@@ -312,16 +315,17 @@ final class IslandViewModel: ObservableObject {
             }
         }
         let free = Space(left: value(left, space.left), right: value(right, space.right))
+        // «Первый замер — сразу» относится к значкам справа: пока их не видели, справа места «вдоволь» лишь по догадке.
+        let settled = hasMeasuredSpace
+        if right != .unknown { hasMeasuredSpace = true }
         if free.same(as: space) {
             pendingFree = nil
-            hasMeasuredSpace = true
             return false
         }
-        if hasMeasuredSpace, !immediate {
+        if settled, !immediate {
             if let pending = pendingFree, pending.value.same(as: free) { pendingFree = (free, pending.seen + 1) } else { pendingFree = (free, 1) }
             guard (pendingFree?.seen ?? 0) >= 2 else { return false }
         }
-        hasMeasuredSpace = true
         pendingFree = nil
         space = free
         recomputeLayout()
