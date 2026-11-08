@@ -6,7 +6,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { isIP } from "node:net";
 import type { Context, MiddlewareHandler } from "hono";
 import type { Download, GithubAsset } from "./github.ts";
-import type { FeedbackIn, FeedbackRow, Install, Ping, Store } from "./store.ts";
+import type { FeedbackIn, FeedbackRow, Install, Ping, Store, VersionCount } from "./store.ts";
 
 const UUID = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/;
 
@@ -63,6 +63,7 @@ const none = '<span class="muted">—</span>';
 
 export interface PageData {
   installs: Install[];
+  versions: VersionCount[];
   feedback: FeedbackRow[];
   downloads: { at: string; ip: string; ua: string }[];
   downloadTotal: number;
@@ -70,6 +71,13 @@ export interface PageData {
 }
 
 export function page(data: PageData): string {
+  const total = data.installs.length;
+  const versions = data.versions
+    .map(
+      (v) => `<tr><td>${escapeHtml(v.version)}</td><td class="num">${v.devices}</td><td class="num">${Math.round((v.devices / total) * 100)}%</td>
+<td>${day(v.last_seen)}</td></tr>`,
+    )
+    .join("\n");
   const installs = data.installs
     .map((i) => {
       const mac = [i.model, i.chip, i.ram_gb ? `${i.ram_gb} ГБ` : ""].filter(Boolean).map(escapeHtml).join(" · ");
@@ -106,7 +114,13 @@ th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6e6e73;wh
 </style>
 <h1>topbar: установки и отзывы</h1>
 <p>Установок с согласием: ${data.installs.length}. Отзывов: ${data.feedback.length}. Скачиваний по ссылке службы: ${data.downloadTotal}.</p>
-<h2>Установки</h2>
+<h2>Версии программы (сводно)</h2>
+<p>Сколько устройств стоит на какой версии: считается последняя версия, о которой устройство сообщило.</p>
+<div class="scroll"><table><thead><tr><th>Версия</th><th class="num">Устройств</th><th class="num">Доля</th><th>Последний раз</th></tr></thead>
+<tbody>
+${versions || '<tr><td colspan="4" class="muted">Пока никого.</td></tr>'}
+</tbody></table></div>
+<h2>Устройства (детально)</h2>
 <div class="scroll"><table><thead><tr><th>Имя</th><th>Mac</th><th>macOS</th><th>Версия</th><th>Язык</th><th>IP</th><th>Первый раз</th><th>Последний раз</th><th class="num">Запусков</th><th>Номер</th></tr></thead>
 <tbody>
 ${installs || '<tr><td colspan="10" class="muted">Пока никого.</td></tr>'}
@@ -260,7 +274,7 @@ export function createApp(store: Store, options: Options): Hono {
     } catch {
       github = null;
     }
-    return { installs: store.list(), feedback: store.feedback(), downloads: store.downloads(), downloadTotal: store.downloadCount(), github };
+    return { installs: store.list(), versions: store.versions(), feedback: store.feedback(), downloads: store.downloads(), downloadTotal: store.downloadCount(), github };
   };
   app.get("/admin", auth, async (c) => c.html(page(await snapshot())));
   app.get("/admin.json", auth, async (c) => c.json(await snapshot()));

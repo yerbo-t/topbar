@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createApp, parsePing, parseFeedback, page } from "../src/app.ts";
-import { Store } from "../src/store.ts";
+import { Store, compareVersions } from "../src/store.ts";
 
 const ID = "7C1B2A3D-1111-4222-8333-444455556666";
 const good = { id: ID, name: "Анна", version: "0.2.0", build: "32", macos: "26.6.2", event: "install", model: "Mac15,6", chip: "Apple M3 Pro", ramGB: 18, language: "ru-KZ" };
@@ -62,7 +62,7 @@ test("разбор записи: обрезка и регистр номера",
   assert.equal(ping?.id, ID);
   assert.equal(ping?.name?.length, 60);
   assert.equal(ping?.event, "launch");
-  assert.ok(page({ installs: [], feedback: [], downloads: [], downloadTotal: 0, github: null }).includes("Пока никого"));
+  assert.ok(page({ installs: [], versions: [], feedback: [], downloads: [], downloadTotal: 0, github: null }).includes("Пока никого"));
 });
 
 test("подделанная левая часть X-Forwarded-For не обходит ограничение", async () => {
@@ -170,4 +170,39 @@ test("витрина: главная и картинки отдаются, по�
   assert.notEqual((await app.request("/assets/%2e%2e/package.json")).status, 200, "и закодированным путём тоже");
   const bare = createApp(new Store(":memory:"), { adminPassword: "correct-horse-battery" });
   assert.equal((await bare.request("/")).status, 404, "без publicDir витрины нет");
+});
+
+const other = (n: number) => `7C1B2A3D-1111-4222-8333-44445555000${n}`;
+
+test("версии сравниваются по числам, а не по тексту", () => {
+  assert.ok(compareVersions("0.2.10", "0.2.9") > 0);
+  assert.ok(compareVersions("0.2.3", "0.2.3") === 0);
+  assert.ok(compareVersions("0.3.0", "0.2.99") > 0);
+  assert.ok(compareVersions("1.0", "1.0.1") < 0, "короткая версия меньше длинной с тем же началом");
+});
+
+test("сводка: сколько устройств на какой версии, новые версии выше", () => {
+  const store = new Store(":memory:");
+  const now = new Date("2026-11-08T10:00:00Z");
+  store.record({ ...good, id: other(1), version: "0.2.3" }, "1.1.1.1", new Date("2026-11-01T10:00:00Z"));
+  store.record({ ...good, id: other(2), version: "0.2.3" }, "1.1.1.2", new Date("2026-11-05T10:00:00Z"));
+  store.record({ ...good, id: other(3), version: "0.2.10" }, "1.1.1.3", now);
+  store.record({ ...good, id: other(4), version: "0.2.9" }, "1.1.1.4", new Date("2026-11-02T10:00:00Z"));
+  // Устройство обновилось: считается только на новой версии.
+  store.record({ ...good, id: other(1), version: "0.2.10" }, "1.1.1.1", now);
+  const versions = store.versions();
+  assert.deepEqual(versions.map((v) => [v.version, v.devices]), [["0.2.10", 2], ["0.2.9", 1], ["0.2.3", 1]]);
+  assert.equal(versions[0].last_seen, now.toISOString());
+});
+
+test("страница и JSON показывают сводку по версиям с долей", async () => {
+  const { app, post } = make();
+  for (const [n, version] of [[1, "0.2.3"], [2, "0.2.3"], [3, "0.2.4"]] as const) await post({ ...good, id: other(n), version }, { "x-forwarded-for": `3.3.3.${n}` });
+  const html = await (await app.request("/admin", { headers: { authorization: auth } })).text();
+  assert.ok(html.includes("Версии программы"));
+  assert.match(html, /<td>0\.2\.3<\/td>\s*<td class="num">2<\/td>\s*<td class="num">67%<\/td>/);
+  assert.match(html, /<td>0\.2\.4<\/td>\s*<td class="num">1<\/td>\s*<td class="num">33%<\/td>/);
+  assert.ok(html.indexOf("0.2.4</td>") < html.indexOf("0.2.3</td>"), "новая версия выше старой");
+  const json = (await (await app.request("/admin.json", { headers: { authorization: auth } })).json()) as { versions: { version: string; devices: number }[] };
+  assert.deepEqual(json.versions.map((v) => [v.version, v.devices]), [["0.2.4", 1], ["0.2.3", 2]]);
 });
