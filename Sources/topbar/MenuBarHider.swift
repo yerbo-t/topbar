@@ -14,6 +14,10 @@ final class MenuBarHider {
 
     /// Длина выталкивателя в свёрнутом виде. Система сама обрезает её (на этом Mac — до ~5000), но и этого хватает.
     static let hiddenLength: CGFloat = 10000
+    /// Опрос положения выталкивателя при сворачивании: шаг, предел попыток (≈2,7 с) и как часто подталкивать длиной (≈0,15 с).
+    private static let settlePoll = 0.03
+    private static let settleLimit = 90
+    private static let settleNudgeEvery = 5
 
     /// Имена для сохранения положения значков. Пока владелец их не двигал, знак ставится у правого края (рядом с «Пунктом
     /// управления»): на Mac с вырезом слева места нет, система роняет самые левые значки, а новые по умолчанию встают
@@ -74,7 +78,7 @@ final class MenuBarHider {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self, self.isEnabled, !self.isCollapsed, UserDefaults.standard.bool(forKey: Self.collapsedKey),
                       (self.itemsToHide() ?? 0) > 0 else { return }
-                self.collapse()
+                self.collapseAligned()
             }
         }
     }
@@ -99,18 +103,22 @@ final class MenuBarHider {
         }
         // nil — строка меню сейчас спрятана (полноэкранное окно), значков не разглядеть: считаем, что прятать есть что.
         if let count = itemsToHide(), count == 0 { return .nothingToHide }
-        collapse()
+        collapseAligned()
         return .changed
     }
 
-    /// Свернуть: выталкиватель создаётся заново и сразу длинным. Новый значок система ставит на сохранённое место надёжнее, чем
-    /// сдвигает старый; а промежуточное «узкий и видимый» нельзя: пока он доезжает до знака, значки на глаз сдвигаются на его
-    /// ширину и переставляются, и только потом пропадают. Встал ли он впритык к знаку, смотрит сторож по оставшимся на виду
-    /// значкам: зазор между окнами сразу после сворачивания проверять нельзя — замером он бывает ненулевым, пока система
-    /// доводит рамки, и ложная «перестановка» вернула бы тот самый скачок.
-    private func collapse() {
+    /// Свернуть, предварительно поставив выталкиватель впритык к знаку: иначе спрячется только часть значков или ни одного.
+    /// В развёрнутом виде выталкивателя в строке нет, поэтому на время проверки он показывается узким, и значки на этот миг
+    /// сдвигаются на его ширину. Сразу длинным его создавать нельзя: замером (2026-11-07) так значки то уходят за ~20 мс, то
+    /// не уходят вовсе, особенно когда строка меню спрятана полноэкранным окном, и сторож переставляет его лишь через ~2 с.
+    private func collapseAligned() {
+        // Новый значок система ставит на сохранённое место надёжнее, чем сдвигает старый, поэтому выталкиватель создаётся заново.
         recreatePusher()
-        setCollapsed(true)
+        settlePusher(allowRebuild: true) { [weak self] ok in
+            guard let self, self.isEnabled, !self.isCollapsed else { return }
+            if !ok { Self.trace("выталкиватель не встал впритык к знаку за 3 с, сворачиваю как есть (сторож поправит)") }
+            self.setCollapsed(true)
+        }
     }
 
     func setCollapsed(_ collapsed: Bool) {
@@ -141,7 +149,7 @@ final class MenuBarHider {
 
     /// Пересоздать выталкиватель сразу левее знака. Свёрнуто — дождаться, пока он встанет впритык (спрятанные значки на это
     /// время на долю секунды показываются), и вернуть длинным; развёрнуто — просто убрать из строки: место ему нужно только при сворачивании,
-    /// и `collapse` создаёт его заново.
+    /// и `collapseAligned` создаёт его заново.
     private func rebuildPusher() {
         recreatePusher()
         guard isCollapsed else { applyLength(); return }
@@ -165,7 +173,8 @@ final class MenuBarHider {
 
     /// Новый значок система ставит на сохранённое место через долю секунды (видно, как он «доезжает»), иногда не сразу. Ждём, пока зазор
     /// между выталкивателем и знаком не станет нулевым; пока ждём, подталкиваем длиной (1 ↔ 2), а если за ~0,9 с не встал — создаём
-    /// заново (до двух раз). Всего до ~2,7 с; `done(false)` — так и не встал.
+    /// заново (до двух раз). Всего до ~2,7 с; `done(false)` — так и не встал. Опрос частый (30 мс): пока значки сдвинуты узким
+    /// выталкивателем, каждая лишняя доля секунды ожидания — это видимый скачок.
     private func settlePusher(allowRebuild: Bool, done: @escaping (Bool) -> Void) {
         settleToken += 1
         settleAttempts = 0
@@ -173,17 +182,17 @@ final class MenuBarHider {
     }
 
     private func settleStep(_ token: Int, allowRebuild: Bool, done: @escaping (Bool) -> Void) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.settlePoll) { [weak self] in
             guard let self, token == self.settleToken, self.isEnabled else { return }
             self.settleAttempts += 1
             let gap = self.gapBetweenPusherAndControl()
             Self.trace("выталкиватель: попытка \(self.settleAttempts), зазор до знака \(gap.map(String.init) ?? "?")")
             if let gap, abs(gap) <= 4 { done(true); return }
-            if self.settleAttempts >= 18 { done(false); return }
-            if allowRebuild, self.settleAttempts % 6 == 0 {
+            if self.settleAttempts >= Self.settleLimit { done(false); return }
+            if allowRebuild, self.settleAttempts % (Self.settleLimit / 3) == 0 {
                 self.recreatePusher()
-            } else {
-                self.pusher?.length = self.settleAttempts % 2 == 0 ? 1 : 2
+            } else if self.settleAttempts % Self.settleNudgeEvery == 0 {
+                self.pusher?.length = (self.settleAttempts / Self.settleNudgeEvery) % 2 == 0 ? 1 : 2
             }
             self.settleStep(token, allowRebuild: allowRebuild, done: done)
         }
