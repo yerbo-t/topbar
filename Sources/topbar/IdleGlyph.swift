@@ -153,6 +153,9 @@ final class IdleGlyphView: NSView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    /// Клики принимает само ушко, а не картинка внутри: картинка (NSControl) съела бы их и никому не передала.
+    override func hitTest(_ point: NSPoint) -> NSView? { bounds.contains(convert(point, from: superview)) ? self : nil }
+
     override func mouseDown(with event: NSEvent) { onClick?(event.modifierFlags.contains(.control)) }
     override func rightMouseDown(with event: NSEvent) { onClick?(true) }
 
