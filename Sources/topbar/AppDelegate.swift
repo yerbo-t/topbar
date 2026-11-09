@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var model: IslandViewModel!
     private var panel: IslandPanelController!
     private var menu: MenuController!
+    private var idleGlyph: IdleGlyphController!
     private let system = SystemState()
     private let updater = AppUpdater()
     private let telemetry = Telemetry()
@@ -22,6 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel = IslandPanelController(model: model)
         menu = MenuController()
         model.icons = menu.iconModel
+        idleGlyph = IdleGlyphController(menu: menu)
+        menu.onIconChange = { [weak self] in self?.idleGlyph.refreshImage() }
+        panel.onHiddenChange = { [weak self] hidden in self?.idleGlyph.setIslandHidden(hidden) }
+        idleGlyph.setIslandHidden(model.mode == .hidden)
         menu.onPlayerToggle = { [weak self] on in self?.model.setPlayerEnabled(on) }
         menu.updater = updater
         menu.telemetry = telemetry
