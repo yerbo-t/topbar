@@ -467,7 +467,7 @@ final class IslandViewModel: ObservableObject {
         }
         let question = questions[ask.index]
         guard question.options.contains(where: { $0.label == label }) else { return }
-        ask.notice = nil
+        clearAskNotice()
         Self.askLog.notice("ask: вариант нажат, вопрос \(self.ask.index + 1, privacy: .public) из \(questions.count, privacy: .public), несколько ответов: \(question.multiSelect, privacy: .public)")
         if question.multiSelect {
             var chosen = ask.picks[question.question] ?? []
@@ -484,7 +484,7 @@ final class IslandViewModel: ObservableObject {
     func askNext() {
         guard !ask.sending, let questions = currentQuestions, ask.index < questions.count,
               !(ask.picks[questions[ask.index].question] ?? []).isEmpty else { return }
-        ask.notice = nil
+        clearAskNotice()
         askAdvance()
     }
 
@@ -523,6 +523,14 @@ final class IslandViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Надпись о недоставленном ответе живёт до первого нажатия; высота карточки считалась с ней, поэтому после снятия надписи
+    /// карточку надо пересчитать, иначе под вариантами остаётся пустая полоса.
+    private func clearAskNotice() {
+        guard ask.notice != nil else { return }
+        ask.notice = nil
+        askChanged(resize: true)
     }
 
     private func askChanged(resize: Bool) {
