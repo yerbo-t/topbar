@@ -1,6 +1,7 @@
 ---
 paths:
-  - "Sources/topbar/IdleGlyph.swift"
+  - "Sources/topbar/IdleGlyphController.swift"
+  - "Sources/topbar/IdleGlyphView.swift"
   - "Sources/topbar/IslandPanelController.swift"
   - "Sources/TopbarCore/IdleGlyph.swift"
 ---
