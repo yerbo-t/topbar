@@ -71,20 +71,36 @@ final class MenuController: NSObject, NSMenuDelegate {
     private var iconFrame: NSRect? { statusItem.button?.window?.frame }
 
     /// Закрашенный знак — значки спрятаны, контурный — показаны.
-    private func updateIcon() {
-        guard let button = statusItem.button else { return }
-        button.image = ControlIcon.image(filled: !hider.isEnabled || hider.isCollapsed)
-        var tip = hider.isEnabled
+    var glyphIsFilled: Bool { !hider.isEnabled || hider.isCollapsed }
+
+    var glyphTip: String {
+        let tip = hider.isEnabled
             ? (hider.isCollapsed ? "Значки спрятаны. Клик — показать, правый клик — настройка значков и меню" : "Значки показаны. Клик — спрятать, правый клик — настройка значков и меню")
             : "Клик — список значков, правый клик — настройка значков и меню"
-        if let version = updater?.availableVersion { tip = "Доступна версия \(version). " + tip }
-        button.toolTip = tip
+        if let version = updater?.availableVersion { return "Доступна версия \(version). " + tip }
+        return tip
+    }
+
+    /// Вид знака поменялся (его же показывает мини-знак в вырезе).
+    var onIconChange: (() -> Void)?
+
+    private func updateIcon() {
+        guard let button = statusItem.button else { return }
+        button.image = ControlIcon.image(filled: glyphIsFilled)
+        button.toolTip = glyphTip
+        onIconChange?()
     }
 
     @objc private func statusClicked() {
         let event = NSApp.currentEvent
         guard let frame = iconFrame else { return }
-        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
+        glyphClicked(anchoredTo: frame, secondary: event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true)
+    }
+
+    /// Клик по знаку: по знаку в строке меню и по мини-знаку в вырезе одно и то же. `frame` — где стоит знак (под ним
+    /// открывается панель).
+    func glyphClicked(anchoredTo frame: NSRect, secondary: Bool) {
+        if secondary {
             list.toggle(anchoredTo: frame)          // настройка значков; меню приложения — кнопка «Меню» в панели
             return
         }

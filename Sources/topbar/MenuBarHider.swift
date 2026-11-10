@@ -279,11 +279,15 @@ final class MenuBarHider {
         }
         // Развёрнуто: черта должна стоять впритык к знаку, иначе она «плавает» среди чужих значков. Два раза подряд (≈3 с).
         if !isCollapsed {
-            guard let gap = gapBetweenPusherAndControl(), abs(gap) > 4 else { misalignedChecks = 0; return }
+            guard let gap = gapBetweenPusherAndControl() else { misalignedChecks = 0; return }
+            let strays = iconsBetweenPusherAndControl()?.count ?? 0
+            if abs(gap) <= 4 { repairedStrayCount = 0 }
+            guard PusherPlacement.needsRepairWhenExpanded(gap: Double(gap), strayIcons: strays, repairedStrayCount: repairedStrayCount) else { misalignedChecks = 0; return }
             misalignedChecks += 1
             guard misalignedChecks >= 2 else { return }
             misalignedChecks = 0
-            repairPusher("разделитель стоял не у знака (зазор \(gap))")
+            repairedStrayCount = strays
+            repairPusher("разделитель стоял не у знака (зазор \(gap), значков между ними: \(strays))")
             return
         }
         let strayIcons = iconsBetweenPusherAndControl()?.count ?? 0

@@ -10,6 +10,14 @@ public enum PusherPlacement {
         !others.contains { $0.width > 2 && $0.minX >= pusherMaxX - tolerance && $0.maxX <= glyphMinX + tolerance }
     }
 
+    /// Развёрнутая черта стоит не у знака: пересоздавать ли её. Системные значки (индикатор микрофона и т. п.) система ставит между
+    /// чертой и знаком сама, и убрать их нельзя: после одного пересоздания, которое их не убрало (`repairedStrayCount`), они
+    /// принимаются как есть, иначе черта мигала бы каждые несколько секунд. Зазор без значков между ними чинится всегда.
+    public static func needsRepairWhenExpanded(gap: Double, strayIcons: Int, repairedStrayCount: Int, tolerance: Double = 4) -> Bool {
+        guard abs(gap) > tolerance else { return false }
+        return strayIcons == 0 || strayIcons > repairedStrayCount
+    }
+
     /// Окно «то же самое»: края совпадают с точностью до `tolerance` (так отсеиваются наши собственные окна).
     public static func sameHorizontalRange(_ a: CGRect, _ b: CGRect, tolerance: Double = 2) -> Bool {
         abs(a.minX - b.minX) <= tolerance && abs(a.maxX - b.maxX) <= tolerance
