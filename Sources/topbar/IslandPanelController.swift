@@ -21,12 +21,13 @@ final class IslandPanel: NSPanel {
 
 @MainActor
 final class IslandPanelController {
-    private let panel = IslandPanel()
+    private var panel = IslandPanel()
+    private let host: NSHostingView<IslandView>
     private let model: IslandViewModel
 
     init(model: IslandViewModel) {
         self.model = model
-        let host = NSHostingView(rootView: IslandView(model: model))
+        host = NSHostingView(rootView: IslandView(model: model))
         host.sizingOptions = []
         panel.contentView = host
         model.onLayoutChange = { [weak self] in self?.layout() }
@@ -117,6 +118,11 @@ final class IslandPanelController {
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
 
         if !panel.isVisible {
+            // Каждое появление — в новом окне: спрятанное окно «на всех столах» система может оставить лишь на части
+            // столов, и новый показ его на остальные не возвращает (2026-11-12 так пропадали список значков и мини-знак).
+            panel.contentView = NSView()
+            panel = IslandPanel()
+            panel.contentView = host
             // Первое появление: из выреза в нужный размер.
             panel.setFrame(target, display: true)
             let notch = ShapeRect(x: (size.width - geometry.notchWidth) / 2, width: geometry.notchWidth, height: geometry.notchHeight, radius: 11)
