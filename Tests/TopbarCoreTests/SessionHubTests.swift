@@ -192,6 +192,41 @@ final class SessionHubTests: XCTestCase {
         XCTAssertEqual(hub.snapshot().first?.status, .waitingPermission, "диалог остался в терминале")
     }
 
+    // MARK: убрать сессию из списка
+
+    func testForgottenSessionLeavesTheListAndComesBackWithItsNextEvent() throws {
+        let path = Fx.socketPath()
+        let hub = makeHub(path: path)
+        try hub.start()
+        defer { hub.stop() }
+        _ = bridge(hook("UserPromptSubmit"), path: path)
+        XCTAssertEqual(hub.snapshot().map(\.sessionId), ["s1"])
+
+        hub.forget(sessionId: "s1")
+        XCTAssertTrue(hub.snapshot().isEmpty)
+
+        _ = bridge(hook("Stop"), path: path)
+        XCTAssertEqual(hub.snapshot().map(\.sessionId), ["s1"], "сессия жива и вернулась со своим событием")
+    }
+
+    func testForgettingASessionHandsItsOpenRequestBackToTheTerminal() throws {
+        let path = Fx.socketPath()
+        let hub = makeHub(path: path)
+        var closed: [String] = []
+        hub.onRequestClosed = { closed.append($0) }
+        try hub.start()
+        defer { hub.stop() }
+        let pending = requestInBackground(path)
+        waitUntil { hub.snapshot().first?.status == .waitingPermission }
+
+        hub.forget(sessionId: "s1")
+        wait(for: [pending.done], timeout: 3)
+        XCTAssertEqual(pending.output(), .some(nil), "без решения — Claude спросит в терминале")
+        hub.flush()
+        XCTAssertEqual(closed.count, 1)
+        XCTAssertTrue(hub.snapshot().isEmpty)
+    }
+
     // MARK: что не показываем карточкой
 
     func testQuestionToolWaitsWithoutCardAndReleasesBridge() throws {

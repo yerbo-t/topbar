@@ -132,6 +132,15 @@ public final class SessionHub {
         }
     }
 
+    /// Убрать сессию с острова, не трогая её процесс: открытые запросы Claude задаст в терминале. Живая сессия вернётся со
+    /// своим следующим событием.
+    public func forget(sessionId: String) {
+        queue.async { [self] in
+            remove(sessionId: sessionId)
+            notifyChange()
+        }
+    }
+
     public func snapshot() -> [Session] { queue.sync { store.snapshot() } }
 
     /// Для тестов и диагностики: выполнить проверку живости немедленно.
@@ -210,15 +219,20 @@ public final class SessionHub {
         emit { self.onRequestClosed?(requestId) }
     }
 
+    /// Убрать сессию; её открытые запросы возвращаются в терминал («без решения»).
+    private func remove(sessionId: String) {
+        for effect in store.remove(sessionId: sessionId) {
+            if case .requestClosed(let id) = effect {
+                channels.removeValue(forKey: id)?.send(.none)
+                emit { self.onRequestClosed?(id) }
+            }
+        }
+    }
+
     private func tick() {
         var changed = false
         for s in store.sessions.values where s.pid > 0 && !ProcessProbe.isAlive(pid: s.pid, startedAt: s.processStartedAt) {
-            for effect in store.remove(sessionId: s.sessionId) {
-                if case .requestClosed(let id) = effect {
-                    channels.removeValue(forKey: id)?.send(.none)
-                    emit { self.onRequestClosed?(id) }
-                }
-            }
+            remove(sessionId: s.sessionId)
             changed = true
         }
         if !store.sweepQuiet(now: Date(), staleToolAfter: staleToolAfter, hasChildProcess: hasChildProcess).isEmpty { changed = true }
