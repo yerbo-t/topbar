@@ -14,7 +14,7 @@ final class IdleGlyphController {
     /// Ушко заходит под вырез: так между ними не бывает светлой щели.
     private static let overlap: CGFloat = 2
 
-    private let panel: NSPanel
+    private var panel = IdleGlyphController.makePanel()
     private let view = IdleGlyphView()
     private weak var menu: MenuController?
     private var islandHidden = false
@@ -23,15 +23,6 @@ final class IdleGlyphController {
 
     init(menu: MenuController) {
         self.menu = menu
-        panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
-        panel.isFloatingPanel = true
-        panel.level = .statusBar
-        panel.backgroundColor = .clear
-        panel.isOpaque = false
-        panel.hasShadow = false
-        panel.hidesOnDeactivate = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        panel.isMovable = false
         panel.contentView = view
         view.onClick = { [weak self] secondary in self?.clicked(secondary: secondary) }
         refreshImage()
@@ -93,6 +84,13 @@ final class IdleGlyphController {
         let x = side == .left ? screen.midX - geometry.notchWidth / 2 - Self.earWidth : screen.midX + geometry.notchWidth / 2 - Self.overlap
         let frame = NSRect(x: x, y: screen.maxY - geometry.notchHeight, width: width, height: geometry.notchHeight)
         view.configure(side: side, overlap: Self.overlap)
+        if !panel.isVisible {
+            // Каждый показ — в новом окне: спрятанное окно «на всех столах» система может оставить лишь на части столов,
+            // и новый показ его на остальные не возвращает (2026-11-12 у владельца знак был только на двух столах из шести).
+            panel.contentView = NSView()
+            panel = Self.makePanel()
+            panel.contentView = view
+        }
         if panel.frame != frame { panel.setFrame(frame, display: true) }
         if !panel.isVisible {
             let animated = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -100,6 +98,19 @@ final class IdleGlyphController {
             panel.orderFrontRegardless()
             if animated { NSAnimationContext.runAnimationGroup { $0.duration = 0.2; panel.animator().alphaValue = 1 } }
         }
+    }
+
+    private static func makePanel() -> NSPanel {
+        let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        panel.isFloatingPanel = true
+        panel.level = .statusBar
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = false
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        panel.isMovable = false
+        return panel
     }
 
     private func clicked(secondary: Bool) {
