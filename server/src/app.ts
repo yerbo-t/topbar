@@ -143,6 +143,8 @@ ${downloads || '<tr><td colspan="3" class="muted">Пока никто не ск�
 
 export interface Options {
   adminPassword: string;
+  /** Логин страницы /admin; не задан — admin. */
+  adminUser?: string;
   /** Записей с одного адреса в минуту. */
   rateLimitPerMinute?: number;
   /** Записей в минуту со всех адресов вместе (защита от «размножения» адресов). */
@@ -266,7 +268,7 @@ export function createApp(store: Store, options: Options): Hono {
     return c.redirect(downloadUrl, 302);
   });
 
-  const auth = basicAuth({ username: "admin", password: options.adminPassword });
+  const auth = basicAuth({ username: options.adminUser ?? "admin", password: options.adminPassword });
   const snapshot = async (): Promise<PageData> => {
     let github: Download[] | null = null;
     try {

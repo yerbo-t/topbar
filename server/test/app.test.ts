@@ -57,6 +57,13 @@ test("список закрыт паролем и экранирует имен�
   assert.equal(json.installs.length, 1);
 });
 
+test("логин страницы задаётся: с ним пускает, с «admin» уже нет", async () => {
+  const app = createApp(new Store(":memory:"), { adminPassword: "correct-horse-battery", adminUser: "owner" });
+  const basic = (user: string) => ({ authorization: "Basic " + Buffer.from(`${user}:correct-horse-battery`).toString("base64") });
+  assert.equal((await app.request("/admin", { headers: basic("owner") })).status, 200);
+  assert.equal((await app.request("/admin", { headers: basic("admin") })).status, 401);
+});
+
 test("разбор записи: обрезка и регистр номера", () => {
   const ping = parsePing({ ...good, id: ID.toLowerCase(), name: "  " + "я".repeat(100), event: undefined });
   assert.equal(ping?.id, ID);
