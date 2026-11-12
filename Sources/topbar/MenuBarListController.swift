@@ -18,7 +18,10 @@ final class MenuBarListController {
         panel.isOpaque = false
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        // Панель встаёт на тот стол, где по знаку кликнули, а не «на все столы»: спрятанное окно «на всех столах» система
+        // может оставить лишь на части столов, и новый показ его на текущий не возвращает. 2026-11-12 у владельца окно
+        // осталось на двух полноэкранных столах (отчего — не найдено), и правый клик показывал список там, а не на экране.
+        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         let host = NSHostingView(rootView: MenuBarListView(model: model))
         host.sizingOptions = []
         panel.contentView = host
@@ -26,7 +29,8 @@ final class MenuBarListController {
         model.onResize = { [weak self] in self?.layout() }
     }
 
-    var isShown: Bool { panel.isVisible }
+    /// Видна на текущем столе. Оставшаяся открытой на другом столе не в счёт: клик по знаку должен её показать, а не спрятать.
+    var isShown: Bool { panel.isVisible && panel.isOnActiveSpace }
 
     func toggle(anchoredTo rect: NSRect) {
         isShown ? hide() : show(anchoredTo: rect)
@@ -37,6 +41,8 @@ final class MenuBarListController {
         model.message = nil
         model.refresh()
         layout()
+        // Открытую на другом столе панель показываем заново: на текущий стол её переносит именно показ.
+        if panel.isVisible { panel.orderOut(nil) }
         panel.orderFrontRegardless()
         // Список перерисовывается по мере поступления данных — подгоняем высоту и положение.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.layout() }
@@ -55,6 +61,8 @@ final class MenuBarListController {
             RunLoop.main.add(timer, forMode: .common)
             trustTimer = timer
         }
+        // Показ поверх уже открытой (на другом столе) панели: прежний монитор снимаем, иначе он остался бы навсегда.
+        if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, !self.panel.frame.contains(NSEvent.mouseLocation) else { return }

@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import os
 import SwiftUI
 import TopbarCore
 
@@ -53,7 +54,11 @@ final class IslandViewModel: ObservableObject {
         var picks: [String: [String]] = [:]
         /// Ответ уже отправлен хабу: повторные нажатия, пока карточка не закрылась, игнорируются.
         var sending = false
+        /// Что пошло не так при отправке ответа (показывается на карточке, пока владелец не нажмёт что-то ещё).
+        var notice: String?
     }
+    /// Журнал вопросов (без текстов вопросов и ответов): `log show --predicate 'subsystem == "dev.topbar.app"'`.
+    private static let askLog = Logger(subsystem: "dev.topbar.app", category: "ask")
     private(set) var ask = AskDraft()
 
     /// Значки строки меню: из них собирается ряд закреплённых над списком сессий (nil — не подключено).
@@ -66,7 +71,7 @@ final class IslandViewModel: ObservableObject {
         }
     }
     private var iconsObserver: AnyCancellable?
-    private var lastPinnedRowCount = 0
+    private var lastPinnedRowHeight: CGFloat = 0
 
     let hub: SessionHub
     let system: SystemState
@@ -274,31 +279,34 @@ final class IslandViewModel: ObservableObject {
         }
     }
 
-    /// Перешли на другой стол или поменялись параметры экрана: ближайшие две секунды замеры места не принимаем.
+    /// Перешли на другой стол или поменялись параметры экрана: ближайшие две секунды значки справа не меряем.
     func noteScreenTransition() {
         spaceFrozenUntil = Date().addingTimeInterval(2)
         pendingFree = nil
     }
 
-    /// Узнать, сколько места до первого значка справа от выреза. true — место изменилось и остров надо пересобрать.
-    /// Значки меняются сами по себе (SwiftBar меняет заголовок, приложения добавляют и убирают значки), поэтому
-    /// пока остров свёрнут, это проверяется раз в пару секунд. Чтобы «уши» не дёргались при переходе между столами, новое
-    /// значение принимается только после двух одинаковых замеров подряд и не во время перехода; самый первый замер — сразу.
+    /// Узнать, сколько места по сторонам выреза: слева — до последнего меню приложения, справа — до первого значка. true — место
+    /// изменилось и остров надо пересобрать. Значки меняются сами по себе (SwiftBar меняет заголовок, приложения добавляют и
+    /// убирают значки), поэтому пока остров свёрнут, это проверяется раз в пару секунд. Чтобы «уши» не дёргались при переходе
+    /// между столами, новое значение принимается только после двух одинаковых замеров подряд, а значки справа во время перехода
+    /// не меряются; самый первый замер — сразу. `onlyLeft` — сменилось приложение: у него другие только меню слева.
     @discardableResult
-    func refreshMenuBarSpace(force: Bool = false, immediate: Bool = false) -> Bool {
+    func refreshMenuBarSpace(force: Bool = false, immediate: Bool = false, onlyLeft: Bool = false) -> Bool {
         guard let geometry else { return false }
         if !force, Date().timeIntervalSince(spaceCheckedAt) < 0.5 { return false }
-        if Date() < spaceFrozenUntil { return false }
         spaceCheckedAt = Date()
-        var right = MenuBarLayout.freeSpaceRightOfNotch(on: geometry.screen, notchWidth: geometry.notchWidth)
+        // Во время перехода между столами окна значков то пропадают, то появляются — такому замеру справа верить нельзя.
+        // Меню слева «Универсальный доступ» сообщает верно и в переходе, и когда строка меню спрятана (полноэкранное окно):
+        // строка выезжает при наведении, и меню оказываются ровно на этих местах. Поэтому левую сторону меряем всегда, иначе
+        // уши от прежнего приложения накрывали «Справку» браузера, пока таймер не догонял.
+        let skipsRight = onlyLeft || Date() < spaceFrozenUntil
+        var right: MenuBarLayout.FreeSpace = skipsRight ? .unknown : MenuBarLayout.freeSpaceRightOfNotch(on: geometry.screen, notchWidth: geometry.notchWidth)
         var left = MenuBarLayout.freeSpaceLeftOfNotch(on: geometry.screen, notchWidth: geometry.notchWidth)
         // Отладка: подставить свободное место (`--debug-free-right 36`, `--debug-free-left 0`), чтобы проверить виды ушей.
         if let value = Self.debugValue("--debug-free-right") { right = .points(value) }
         if let value = Self.debugValue("--debug-free-left") { left = .points(value) }
-        // Значков справа не видно — строка меню спрятана (полноэкранное окно): меню слева тоже не видны, хотя «Универсальный
-        // доступ» и сообщает их места. Остаёмся при последнем известном месте с обеих сторон.
-        if case .unknown = right { return false }
-        // Меню слева не разглядеть (нет «Универсального доступа») — левая сторона остаётся при последнем известном месте.
+        // Сторона, которую не разглядеть (значки справа: строка спрятана или идёт переход; меню слева: нет «Универсального
+        // доступа»), остаётся при последнем известном месте.
         func value(_ sample: MenuBarLayout.FreeSpace, _ last: CGFloat?) -> CGFloat? {
             switch sample {
             case .unknown: return last
@@ -307,16 +315,17 @@ final class IslandViewModel: ObservableObject {
             }
         }
         let free = Space(left: value(left, space.left), right: value(right, space.right))
+        // «Первый замер — сразу» относится к значкам справа: пока их не видели, справа места «вдоволь» лишь по догадке.
+        let settled = hasMeasuredSpace
+        if right != .unknown { hasMeasuredSpace = true }
         if free.same(as: space) {
             pendingFree = nil
-            hasMeasuredSpace = true
             return false
         }
-        if hasMeasuredSpace, !immediate {
+        if settled, !immediate {
             if let pending = pendingFree, pending.value.same(as: free) { pendingFree = (free, pending.seen + 1) } else { pendingFree = (free, 1) }
             guard (pendingFree?.seen ?? 0) >= 2 else { return false }
         }
-        hasMeasuredSpace = true
         pendingFree = nil
         space = free
         recomputeLayout()
@@ -348,7 +357,7 @@ final class IslandViewModel: ObservableObject {
         case .list:
             let rows = CGFloat(presenter.sessions.count)
             let player = presenter.mediaActive ? PlayerView.height : 0
-            let pinned = pinnedRowCount > 0 ? PinnedRowView.height : 0
+            let pinned = PinnedRowMetrics.height(icons?.pinnedRow ?? [])
             return CGSize(width: Self.listWidth, height: notchH + 10 + player + pinned + rows * 54 + 44)
         case .card:
             guard let card = presenter.currentCard else { return .zero }
@@ -358,7 +367,7 @@ final class IslandViewModel: ObservableObject {
             let header = m.titleLine + (hasContext ? m.contextLine : 0)
             if let questions = card.request.questions {
                 let index = min(ask.index, questions.count - 1)
-                let body = QuestionMetrics.bodyHeight(questions[index], index: index, count: questions.count)
+                let body = QuestionMetrics.bodyHeight(questions[index], index: index, count: questions.count, notice: ask.notice != nil)
                 return CGSize(width: m.width, height: ceil(notchH + m.top + header + m.afterHeader + body + m.beforeActions + m.actions + m.bottom))
             }
             let question = CGFloat(m.lines(card.request.question, font: m.questionFont, limit: 2)) * m.questionLine
@@ -433,11 +442,11 @@ final class IslandViewModel: ObservableObject {
     var pinnedRowCount: Int { icons?.pinnedRow.count ?? 0 }
 
     /// Значки или закреплённое поменялись. Содержимое ряда и подпись внизу обновляют сами (они следят за значками); остров
-    /// пересобирается, только если ряд появился, исчез или сменил высоту.
+    /// пересобирается, только если ряд сменил высоту (появился, исчез, перешёл на вторую строку).
     private func iconsChanged() {
-        let count = pinnedRowCount
-        defer { lastPinnedRowCount = count }
-        guard presenter.mode == .list, (count > 0) != (lastPinnedRowCount > 0) else { return }
+        let height = PinnedRowMetrics.height(icons?.pinnedRow ?? [])
+        defer { lastPinnedRowHeight = height }
+        guard presenter.mode == .list, height != lastPinnedRowHeight else { return }
         recomputeLayout()
         withAnimation(Look.reduceMotion ? nil : .easeOut(duration: 0.15)) { objectWillChange.send() }
         onLayoutChange?()
@@ -452,9 +461,14 @@ final class IslandViewModel: ObservableObject {
 
     /// Нажат вариант. Вопрос с одним ответом: ответ принят, дальше следующий вопрос или отправка. С несколькими: отметка.
     func askPick(_ label: String) {
-        guard !ask.sending, let questions = currentQuestions, ask.index < questions.count else { return }
+        guard !ask.sending, let questions = currentQuestions, ask.index < questions.count else {
+            Self.askLog.notice("ask: нажатие проигнорировано (отправка идёт или вопросов нет)")
+            return
+        }
         let question = questions[ask.index]
         guard question.options.contains(where: { $0.label == label }) else { return }
+        clearAskNotice()
+        Self.askLog.notice("ask: вариант нажат, вопрос \(self.ask.index + 1, privacy: .public) из \(questions.count, privacy: .public), несколько ответов: \(question.multiSelect, privacy: .public)")
         if question.multiSelect {
             var chosen = ask.picks[question.question] ?? []
             if let i = chosen.firstIndex(of: label) { chosen.remove(at: i) } else { chosen.append(label) }
@@ -470,6 +484,7 @@ final class IslandViewModel: ObservableObject {
     func askNext() {
         guard !ask.sending, let questions = currentQuestions, ask.index < questions.count,
               !(ask.picks[questions[ask.index].question] ?? []).isEmpty else { return }
+        clearAskNotice()
         askAdvance()
     }
 
@@ -493,18 +508,29 @@ final class IslandViewModel: ObservableObject {
         guard let card = presenter.currentCard else { return }
         let id = card.request.requestId
         ask.sending = true
+        Self.askLog.notice("ask: ответ отправлен хабу")
         hub.answer(requestId: id, picks: ask.picks) { [weak self] delivered in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                Self.askLog.notice("ask: ответ доставлен мосту: \(delivered, privacy: .public)")
                 if delivered {
                     self.apply { $0.requestClosed(id) }
                 } else {
-                    // Не доставлено: запрос уже закрыт (карточку снимет само закрытие) или выбор не подошёл — начинаем вопросы заново.
-                    self.ask = AskDraft(requestId: self.ask.requestId)
+                    // Не доставлено: запрос уже закрыт (карточку снимет само закрытие) или выбор не подошёл. Говорим об этом на карточке
+                    // и начинаем вопросы заново: молчаливое «ничего не произошло» хуже любой надписи.
+                    self.ask = AskDraft(requestId: self.ask.requestId, notice: "Не удалось передать ответ Claude. Ответьте в терминале.")
                     self.askChanged(resize: true)
                 }
             }
         }
+    }
+
+    /// Надпись о недоставленном ответе живёт до первого нажатия; высота карточки считалась с ней, поэтому после снятия надписи
+    /// карточку надо пересчитать, иначе под вариантами остаётся пустая полоса.
+    private func clearAskNotice() {
+        guard ask.notice != nil else { return }
+        ask.notice = nil
+        askChanged(resize: true)
     }
 
     private func askChanged(resize: Bool) {

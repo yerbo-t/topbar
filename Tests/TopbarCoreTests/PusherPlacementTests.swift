@@ -33,4 +33,25 @@ final class PusherPlacementTests: XCTestCase {
         XCTAssertTrue(PusherPlacement.sameHorizontalRange(item(1086, 36), item(1087, 36)))
         XCTAssertFalse(PusherPlacement.sameHorizontalRange(item(1086, 36), item(1050, 36)))
     }
+    func testExpandedDividerIsFineWhenItStandsNextToTheGlyph() {
+        XCTAssertFalse(PusherPlacement.needsRepairWhenExpanded(gap: 0, strayIcons: 0, repairedStrayCount: 0))
+        XCTAssertFalse(PusherPlacement.needsRepairWhenExpanded(gap: 4, strayIcons: 0, repairedStrayCount: 0))
+    }
+
+    func testExpandedDividerIsRepairedOnceForAStrayIcon() {
+        XCTAssertTrue(PusherPlacement.needsRepairWhenExpanded(gap: 24, strayIcons: 1, repairedStrayCount: 0))
+    }
+
+    func testExpandedDividerAcceptsASystemIconThatARepairDidNotRemove() {
+        // индикатор микрофона система ставит между чертой и знаком сама: после одного пересоздания его принимаем, иначе черта мигала бы каждые 3 с
+        XCTAssertFalse(PusherPlacement.needsRepairWhenExpanded(gap: 24, strayIcons: 1, repairedStrayCount: 1))
+    }
+
+    func testExpandedDividerIsRepairedAgainWhenAnotherIconAppears() {
+        XCTAssertTrue(PusherPlacement.needsRepairWhenExpanded(gap: 48, strayIcons: 2, repairedStrayCount: 1))
+    }
+
+    func testExpandedDividerWithAGapButNoIconsBetweenIsStillRepaired() {
+        XCTAssertTrue(PusherPlacement.needsRepairWhenExpanded(gap: 30, strayIcons: 0, repairedStrayCount: 0))
+    }
 }

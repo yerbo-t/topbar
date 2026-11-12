@@ -74,7 +74,9 @@ enum MenuBarLayout {
             guard display.minX + (frame.minX - origin) < notchLeft else { continue }
             return .points(max(0, notchLeft - maxX))
         }
-        return .unlimited
+        // У приложения со строкой меню всегда есть хотя бы меню Apple: пустой список значит «меню ещё не прочитались» (Zoom
+        // сразу после перехода), а не «места вдоволь» — иначе уши на миг раздуваются во всю ширину и накрывают «Справку».
+        return .unknown
     }
 
     private static func axAttribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {

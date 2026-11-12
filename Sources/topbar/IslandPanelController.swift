@@ -40,21 +40,47 @@ final class IslandPanelController {
         timer.tolerance = 1
         RunLoop.main.add(timer, forMode: .common)
         spaceTimer = timer
-        // Другое приложение — другие меню слева от выреза: место перемеряем сразу, не дожидаясь таймера.
+        watchOutsideClicks()
+        // Другое приложение — другие меню слева от выреза: место перемеряем сразу, не дожидаясь таймера (к этому уведомлению
+        // строка меню уже принадлежит новому приложению). Значки справа от смены приложения не меняются и тут не меряются.
+        // Тяжёлое приложение (Zoom) в момент перехода меню не отдаёт — тогда уши остались бы от прежнего, пока таймер
+        // не подтвердит место дважды (до 5 с); поэтому меряем ещё дважды, когда меню уже прочитаются.
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                MainActor.assumeIsolated {
-                    guard let self, self.model.mode == .collapsed else { return }
-                    if self.model.refreshMenuBarSpace(force: true, immediate: true) { self.layout() }
+            MainActor.assumeIsolated {
+                self?.remeasureLeft()
+                for delay in [0.5, 1.5] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.remeasureLeft() }
                 }
             }
         }
     }
 
+    private func remeasureLeft() {
+        guard model.mode == .collapsed else { return }
+        if model.refreshMenuBarSpace(force: true, immediate: true, onlyLeft: true) { layout() }
+    }
+
     private var spaceTimer: Timer?
     private var activationObserver: NSObjectProtocol?
+    private var clickMonitors: [Any] = []
+
+    /// Остров скрыт (нет сессий) или показан: вызывается при каждом пересчёте окна.
+    var onHiddenChange: ((Bool) -> Void)?
+
+    /// Клик мимо острова сворачивает раскрытый список. Карточки (вопрос, разрешение) не трогаем: на них надо ответить, и
+    /// случайный клик по соседнему окну её не уберёт. Нажатия в чужих окнах видит глобальный монитор (разрешений для мыши не
+    /// нужно), в окнах самого приложения — локальный.
+    private func watchOutsideClicks() {
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        let check: () -> Void = { [weak self] in
+            guard let self, self.model.mode == .list, !self.panel.frame.contains(NSEvent.mouseLocation) else { return }
+            self.model.collapse()
+        }
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { _ in MainActor.assumeIsolated(check) }) { clickMonitors.append(global) }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { event in MainActor.assumeIsolated(check); return event }) { clickMonitors.append(local) }
+    }
 
     private var settleWork: DispatchWorkItem?
     private var hideCheck: DispatchWorkItem?
@@ -64,6 +90,7 @@ final class IslandPanelController {
     /// фигуру, а саму фигуру двигает пружина SwiftUI; когда она успокоилась, окно сжимается до итогового размера (иначе прозрачная
     /// часть окна перехватывала бы клики).
     func layout() {
+        defer { onHiddenChange?(model.mode == .hidden) }
         model.geometry = NotchGeometry.find()
         if model.mode == .collapsed { model.refreshMenuBarSpace() }
         model.recomputeLayout()

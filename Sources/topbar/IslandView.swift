@@ -116,7 +116,9 @@ struct CollapsedView: View {
                 EqualizerView(playing: model.nowPlaying?.playing ?? false).frame(width: 14, height: 12)
                     .frame(width: ears.rightWidth).clipped()
             } else {
-                ear(ears.left, style: ears.style, alignment: .trailing, width: ears.leftWidth)
+                // Слова прижаты к внешним краям ушей с одинаковым отступом: уши одной ширины, а слова разной длины, и прижатые
+                // к вырезу они стояли криво относительно чёрной фигуры (слева отступ втрое больше, чем справа).
+                ear(ears.left, style: ears.style, alignment: .leading, width: ears.leftWidth)
                 Spacer().frame(width: notchW)
                 rightEar(ears)
             }
@@ -133,13 +135,13 @@ struct CollapsedView: View {
     @ViewBuilder private func rightEar(_ ears: EarLayout) -> some View {
         let playing = model.nowPlaying?.playing ?? false
         if !ears.showsMedia {
-            ear(ears.right, style: ears.style, alignment: .leading, width: ears.rightWidth)
+            ear(ears.right, style: ears.style, alignment: .trailing, width: ears.rightWidth)
         } else if ears.right.isEmpty {
             ArtworkView(image: model.artwork, size: 18, radius: 5).opacity(playing ? 1 : 0.55)
                 .frame(width: ears.rightWidth)
         } else {
             HStack(spacing: 0) {
-                ear(ears.right, style: ears.style, alignment: .leading, width: ears.rightWidth - EarLayout.mediaSlot)
+                ear(ears.right, style: ears.style, alignment: .trailing, width: ears.rightWidth - EarLayout.mediaSlot)
                 ArtworkView(image: model.artwork, size: 18, radius: 5).opacity(playing ? 1 : 0.55)
                     .frame(width: EarLayout.mediaSlot, alignment: .leading)
             }
