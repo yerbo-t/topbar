@@ -184,8 +184,8 @@ struct ListView: View {
                 PinnedRowView(icons: icons) { model.pressPinned($0) }.riseIn(playerSlots)
             }
             ForEach(Array(model.presenter.sessions.enumerated()), id: \.element.sessionId) { index, session in
-                Button { model.rowTapped(session) } label: { RowView(session: session, label: model.label(for: session)) }
-                    .buttonStyle(RowButtonStyle())
+                SessionRow(session: session, label: model.label(for: session),
+                           onOpen: { model.rowTapped(session) }, onClose: { model.close(session) })
                     .riseIn(index + offset)
             }
             HStack {
@@ -222,14 +222,66 @@ struct RowButtonStyle: ButtonStyle {
     }
 }
 
-struct RowView: View {
+/// Строка сессии: нажатие ведёт к сессии. Под курсором вместо точки статуса — крест: первое нажатие спрашивает «Закрыть?»,
+/// второе закрывает; увёл курсор — вопрос снимается. Крест лежит поверх строки, а не внутри её кнопки: вложенная кнопка
+/// делила бы нажатие со строкой.
+struct SessionRow: View {
     let session: Session
     let label: SessionLabel
+    let onOpen: () -> Void
+    let onClose: () -> Void
     @State private var hovering = false
+    @State private var isArmed = false
+
+    var body: some View {
+        Button(action: onOpen) { RowView(session: session, label: label, hovering: hovering, isArmed: isArmed) }
+            .buttonStyle(RowButtonStyle())
+            .overlay(alignment: .leading) {
+                if hovering {
+                    Button { if isArmed { onClose() } else { isArmed = true } } label: { closeLabel }
+                        .buttonStyle(.plain)
+                        .padding(.leading, 9)
+                        .accessibilityLabel(isArmed ? "Подтвердить: закрыть сессию" : "Закрыть сессию")
+                }
+            }
+            .onHover { inside in
+                hovering = inside
+                if !inside { isArmed = false }
+            }
+    }
+
+    @ViewBuilder private var closeLabel: some View {
+        if isArmed {
+            Text("Закрыть?")
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: RowView.armedSlot + 4, height: 22)
+                .background(Capsule().fill(Color.red.opacity(0.85)))
+        } else {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(Look.muted)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+    }
+}
+
+struct RowView: View {
+    /// Место под «Закрыть?» вместо точки статуса: подпись не наезжает на имя сессии.
+    static let armedSlot: CGFloat = 70
+    let session: Session
+    let label: SessionLabel
+    let hovering: Bool
+    let isArmed: Bool
 
     var body: some View {
         HStack(spacing: 12) {
-            StatusDot(status: session.status)
+            if isArmed {
+                Color.clear.frame(width: Self.armedSlot, height: 8)
+            } else {
+                StatusDot(status: session.status).opacity(hovering ? 0 : 1)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 // Крупно имя сессии, рядом спокойно проект (или ветка, если крупно уже проект).
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -250,7 +302,6 @@ struct RowView: View {
         // Строке, которой нужно внимание (ждёт разрешения), — заметная подсветка, остальным — только под курсором.
         .background(RoundedRectangle(cornerRadius: 14)
             .fill(session.status == .waitingPermission ? Look.hot : (hovering ? Color.white.opacity(0.05) : .clear)))
-        .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
     }
 

@@ -427,6 +427,13 @@ final class IslandViewModel: ObservableObject {
         apply { $0.dismissCard() }
     }
 
+    /// Крест в строке: сессию во вкладке терминала закрыть вместе со вкладкой, иначе только убрать с острова (она вернётся
+    /// со своим следующим событием). С острова убираем сразу, не дожидаясь, пока процесс завершится.
+    func close(_ session: Session) {
+        SessionCloser.close(session)
+        hub.forget(sessionId: session.sessionId)
+    }
+
     func decide(allow: Bool) {
         guard let card = presenter.currentCard else { return }
         let id = card.request.requestId

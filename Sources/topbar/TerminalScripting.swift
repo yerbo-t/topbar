@@ -46,6 +46,8 @@ enum TerminalScripting {
         let focusedScript: String
         /// Строка AppleScript: выбрать вкладку с этим tty (`/dev/ttys004`) и вернуть "ok", если нашли.
         let focusScript: (_ device: String) -> String
+        /// Строка AppleScript: закрыть вкладку (или часть окна) с этим tty и вернуть "ok"; nil — закрывать не умеем.
+        var closeScript: ((_ device: String) -> String)? = nil
     }
 
     static let ghostty = "com.mitchellh.ghostty"
@@ -63,18 +65,46 @@ enum TerminalScripting {
                     end if
                     return "none"
                 end tell
+                """ },
+            closeScript: { device in """
+                tell application "Ghostty"
+                    set matches to (every terminal whose tty is "\(device)")
+                    if (count of matches) > 0 then
+                        close (item 1 of matches)
+                        return "ok"
+                    end if
+                    return "none"
+                end tell
                 """ }),
         "com.apple.Terminal": Driver(
             name: "Terminal",
             focusedScript: "tell application id \"com.apple.Terminal\" to get tty of selected tab of front window",
+            // Вкладка без процессов — оставшаяся после выхода оболочки: она помнит прежний tty, а его уже получила новая
+            // вкладка с сессией. Такие пропускаем, иначе переход приводил в мёртвую вкладку (замер 2026-11-12).
             focusScript: { device in """
                 tell application id "com.apple.Terminal"
                     repeat with w in windows
                         repeat with t in tabs of w
-                            if tty of t is "\(device)" then
+                            if tty of t is "\(device)" and (count of (processes of t)) > 0 then
                                 if miniaturized of w then set miniaturized of w to false
                                 set selected tab of w to t
                                 set index of w to 1
+                                return "ok"
+                            end if
+                        end repeat
+                    end repeat
+                    return "none"
+                end tell
+                """ },
+            // Каждая вкладка Terminal в словаре — отдельное окно с одной вкладкой; закрываем, только если так и есть, чтобы не
+            // закрыть заодно соседние вкладки.
+            closeScript: { device in """
+                tell application id "com.apple.Terminal"
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            if tty of t is "\(device)" and (count of (processes of t)) > 0 then
+                                if (count of tabs of w) is not 1 then return "none"
+                                close w
                                 return "ok"
                             end if
                         end repeat
@@ -132,10 +162,27 @@ enum TerminalScripting {
     /// Перенести во вкладку с этим tty (`ttys004`): вкладка выбирается, окно выходит вперёд. false — не нашли или нет доступа.
     @discardableResult
     static func focus(bundleId: String, tty: String) -> Bool {
-        guard let driver = drivers[bundleId], isRunning(bundleId), AutomationAccess.shared.isGranted(bundleId) else { return false }
+        guard let driver = drivers[bundleId] else { return false }
+        return run(driver.focusScript, bundleId: bundleId, tty: tty)
+    }
+
+    /// Умеем закрыть вкладку этого терминала: есть скрипт, терминал запущен, доступ «Автоматизация» дан.
+    static func canClose(_ bundleId: String) -> Bool {
+        drivers[bundleId]?.closeScript != nil && isRunning(bundleId) && AutomationAccess.shared.isGranted(bundleId)
+    }
+
+    /// Закрыть вкладку с этим tty. false — не умеем, не нашли или нет доступа.
+    @discardableResult
+    static func close(bundleId: String, tty: String) -> Bool {
+        guard let script = drivers[bundleId]?.closeScript else { return false }
+        return run(script, bundleId: bundleId, tty: tty)
+    }
+
+    private static func run(_ script: (String) -> String, bundleId: String, tty: String) -> Bool {
+        guard isRunning(bundleId), AutomationAccess.shared.isGranted(bundleId) else { return false }
         let device = "/dev/" + tty.filter { $0.isLetter || $0.isNumber }
         var error: NSDictionary?
-        let result = NSAppleScript(source: guarded(driver.focusScript(device)))?.executeAndReturnError(&error).stringValue
+        let result = NSAppleScript(source: guarded(script(device)))?.executeAndReturnError(&error).stringValue
         cachedTTY[bundleId] = nil
         return error == nil && result == "ok"
     }

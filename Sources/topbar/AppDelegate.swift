@@ -47,6 +47,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Точное определение вкладки в Ghostty (Terminal и iTerm2 спросим, когда владелец окажется в них с сессией): узнать (и при необходимости спросить) разрешение «Автоматизация».
         if !CommandLine.arguments.contains("--skip-onboarding") { AutomationAccess.shared.refresh(TerminalScripting.ghostty, ask: true) }
+        // У остальных терминалов только узнаём, дан ли доступ, не спрашивая: иначе после запуска первый переход к вкладке
+        // Terminal лишь выводил его вперёд, пока владелец не побывает в нём с сессией.
+        for id in TerminalScripting.drivers.keys where id != TerminalScripting.ghostty { AutomationAccess.shared.refresh(id, ask: false) }
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -60,7 +63,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let ws = NSWorkspace.shared.notificationCenter
         observers.append(ws.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            if app?.bundleIdentifier == TerminalScripting.ghostty { AutomationAccess.shared.refresh(TerminalScripting.ghostty, ask: true) }
+            MainActor.assumeIsolated {
+                guard let id = app?.bundleIdentifier, TerminalScripting.supports(id) else { return }
+                AutomationAccess.shared.refresh(id, ask: id == TerminalScripting.ghostty)
+            }
         })
         observers.append(ws.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.model.noteScreenTransition() }
