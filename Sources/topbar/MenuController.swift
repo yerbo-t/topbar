@@ -71,9 +71,9 @@ final class MenuController: NSObject, NSMenuDelegate {
     private var iconFrame: NSRect? { statusItem.button?.window?.frame }
 
     /// Закрашенный знак — значки спрятаны, контурный — показаны.
-    var glyphIsFilled: Bool { !hider.isEnabled || hider.isCollapsed }
+    private var glyphIsFilled: Bool { !hider.isEnabled || hider.isCollapsed }
 
-    var glyphTip: String {
+    private var glyphTip: String {
         let tip = hider.isEnabled
             ? (hider.isCollapsed ? "Значки спрятаны. Клик — показать, правый клик — настройка значков и меню" : "Значки показаны. Клик — спрятать, правый клик — настройка значков и меню")
             : "Клик — список значков, правый клик — настройка значков и меню"
@@ -81,14 +81,10 @@ final class MenuController: NSObject, NSMenuDelegate {
         return tip
     }
 
-    /// Вид знака поменялся (его же показывает мини-знак в вырезе).
-    var onIconChange: (() -> Void)?
-
     private func updateIcon() {
         guard let button = statusItem.button else { return }
         button.image = ControlIcon.image(filled: glyphIsFilled)
         button.toolTip = glyphTip
-        onIconChange?()
     }
 
     @objc private func statusClicked() {
@@ -97,9 +93,8 @@ final class MenuController: NSObject, NSMenuDelegate {
         glyphClicked(anchoredTo: frame, secondary: event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true)
     }
 
-    /// Клик по знаку: по знаку в строке меню и по мини-знаку в вырезе одно и то же. `frame` — где стоит знак (под ним
-    /// открывается панель).
-    func glyphClicked(anchoredTo frame: NSRect, secondary: Bool) {
+    /// `frame` — где стоит знак: под ним открывается панель.
+    private func glyphClicked(anchoredTo frame: NSRect, secondary: Bool) {
         if secondary {
             list.toggle(anchoredTo: frame)          // настройка значков; меню приложения — кнопка «Меню» в панели
             return
