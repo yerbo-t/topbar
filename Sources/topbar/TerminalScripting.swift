@@ -90,6 +90,8 @@ enum TerminalScripting {
             focusedScript: "tell application id \"com.apple.Terminal\" to get tty of selected tab of front window",
             // Вкладка без процессов — оставшаяся после выхода оболочки: она помнит прежний tty, а его уже получила новая
             // вкладка с сессией. Такие пропускаем, иначе переход приводил в мёртвую вкладку (замер 2026-11-12).
+            // `frontmost`, а не `index`: `index` только переставляет окно, и когда обычное окно делило стол с полноэкранным,
+            // клавиатура оставалась в прежнем (замер 2026-11-26).
             focusScript: { device in """
                 tell application id "com.apple.Terminal"
                     repeat with w in windows
@@ -97,7 +99,7 @@ enum TerminalScripting {
                             if tty of t is "\(device)" and (count of (processes of t)) > 0 then
                                 if miniaturized of w then set miniaturized of w to false
                                 set selected tab of w to t
-                                set index of w to 1
+                                set frontmost of w to true
                                 return "ok"
                             end if
                         end repeat
