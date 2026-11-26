@@ -67,9 +67,6 @@ final class IslandPanelController {
     private var activationObserver: NSObjectProtocol?
     private var clickMonitors: [Any] = []
 
-    /// Остров скрыт (нет сессий) или показан: вызывается при каждом пересчёте окна.
-    var onHiddenChange: ((Bool) -> Void)?
-
     /// Клик мимо острова сворачивает раскрытый список. Карточки (вопрос, разрешение) не трогаем: на них надо ответить, и
     /// случайный клик по соседнему окну её не уберёт. Нажатия в чужих окнах видит глобальный монитор (разрешений для мыши не
     /// нужно), в окнах самого приложения — локальный.
@@ -91,7 +88,6 @@ final class IslandPanelController {
     /// фигуру, а саму фигуру двигает пружина SwiftUI; когда она успокоилась, окно сжимается до итогового размера (иначе прозрачная
     /// часть окна перехватывала бы клики).
     func layout() {
-        defer { onHiddenChange?(model.mode == .hidden) }
         model.geometry = NotchGeometry.find()
         if model.mode == .collapsed { model.refreshMenuBarSpace() }
         model.recomputeLayout()
