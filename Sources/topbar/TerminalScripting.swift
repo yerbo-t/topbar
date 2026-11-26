@@ -92,17 +92,24 @@ enum TerminalScripting {
             // вкладка с сессией. Такие пропускаем, иначе переход приводил в мёртвую вкладку (замер 2026-11-12).
             // `frontmost`, а не `index`: `index` только переставляет окно, и когда обычное окно делило стол с полноэкранным,
             // клавиатура оставалась в прежнем (замер 2026-11-26).
+            // Каждое окно — в своём `try`: у Terminal бывает окно без имени, на котором `tabs` отдаёт ошибку -10000, и перебор
+            // обрывался на нём, не дойдя до вкладки (замер на Terminal 455.1, 2026-11-26). Истёкшее ожидание (-1712) не глотаем:
+            // иначе зависший терминал стоил бы двух секунд на каждое окно.
             focusScript: { device in """
                 tell application id "com.apple.Terminal"
                     repeat with w in windows
-                        repeat with t in tabs of w
-                            if tty of t is "\(device)" and (count of (processes of t)) > 0 then
-                                if miniaturized of w then set miniaturized of w to false
-                                set selected tab of w to t
-                                set frontmost of w to true
-                                return "ok"
-                            end if
-                        end repeat
+                        try
+                            repeat with t in tabs of w
+                                if tty of t is "\(device)" and (count of (processes of t)) > 0 then
+                                    if miniaturized of w then set miniaturized of w to false
+                                    set selected tab of w to t
+                                    set frontmost of w to true
+                                    return "ok"
+                                end if
+                            end repeat
+                        on error number errorNumber
+                            if errorNumber is -1712 then error number errorNumber
+                        end try
                     end repeat
                     return "none"
                 end tell
@@ -112,13 +119,17 @@ enum TerminalScripting {
             closeScript: { device in """
                 tell application id "com.apple.Terminal"
                     repeat with w in windows
-                        repeat with t in tabs of w
-                            if tty of t is "\(device)" and (count of (processes of t)) > 0 then
-                                if (count of tabs of w) is not 1 then return "none"
-                                close w
-                                return "ok"
-                            end if
-                        end repeat
+                        try
+                            repeat with t in tabs of w
+                                if tty of t is "\(device)" and (count of (processes of t)) > 0 then
+                                    if (count of tabs of w) is not 1 then return "none"
+                                    close w
+                                    return "ok"
+                                end if
+                            end repeat
+                        on error number errorNumber
+                            if errorNumber is -1712 then error number errorNumber
+                        end try
                     end repeat
                     return "none"
                 end tell
