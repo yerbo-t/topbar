@@ -56,14 +56,23 @@ enum TerminalScripting {
         ghostty: Driver(
             name: "Ghostty",
             focusedScript: "tell application \"Ghostty\" to get tty of focused terminal of selected tab of front window",
+            // Сначала выбрать вкладку, потом focus: один focus по невыбранной вкладке окна с другого стола не переводил на тот
+            // стол, а видимое окно при этом теряло фокус (замер 2026-11-26, Ghostty 1.4.0).
             focusScript: { device in """
                 tell application "Ghostty"
                     set matches to (every terminal whose tty is "\(device)")
-                    if (count of matches) > 0 then
-                        focus (item 1 of matches)
-                        return "ok"
-                    end if
-                    return "none"
+                    if (count of matches) is 0 then return "none"
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            if (count of (terminals of t whose tty is "\(device)")) > 0 then
+                                select tab t
+                                focus (item 1 of matches)
+                                return "ok"
+                            end if
+                        end repeat
+                    end repeat
+                    focus (item 1 of matches)
+                    return "ok"
                 end tell
                 """ },
             closeScript: { device in """
